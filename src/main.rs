@@ -1,7 +1,9 @@
+mod commands;
+
 use std::{collections::HashSet, env, sync::Arc};
 
 use anyhow::Result;
-use log::{error, info, Level};
+use log::{error, warn, Level};
 use serenity::{
     async_trait,
     client::bridge::gateway::ShardManager,
@@ -13,7 +15,10 @@ use serenity::{
 };
 use tokio::sync::Mutex;
 
+use commands::misc::*;
+
 #[group]
+#[commands(test, uptime)]
 struct Everyone;
 
 struct Handler;
@@ -21,11 +26,11 @@ struct Handler;
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, _: Context, ready: Ready) {
-        info!("{} rejoint la partie !", ready.user.name);
+        warn!("{} rejoint la partie à {} !", ready.user.name, STARTING_TIME.format("%H:%M:%S"));
     }
 
     async fn resume(&self, _: Context, _: ResumedEvent) {
-        info!("Prêt de nouveau !")
+        warn!("Prêt de nouveau !")
     }
 }
 
