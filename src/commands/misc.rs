@@ -9,13 +9,19 @@ use serenity::{
 pub static STARTING_TIME: Lazy<DateTime<Utc>> = Lazy::new(|| Utc::now());
 
 #[command]
-pub async fn test(ctx: &Context, msg: &Message) -> CommandResult {
-    msg.channel_id.say(&ctx.http, "Test").await?;
+#[num_args(0)]
+#[description("Teste que le bot est bien connecté")]
+#[usage("")]
+pub async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
+    msg.channel_id.say(&ctx.http, "Pong").await?;
 
     Ok(())
 }
 
 #[command]
+#[num_args(0)]
+#[description("Renvoie le temps depuis lequel le bot est en ligne")]
+#[usage("")]
 pub async fn uptime(ctx: &Context, msg: &Message) -> CommandResult {
     let uptime_seconds = Utc::now().timestamp() - STARTING_TIME.timestamp();
 

@@ -1247,6 +1247,7 @@ dependencies = [
  "log",
  "log4rs",
  "once_cell",
+ "rand",
  "serenity",
  "simple_logger",
  "tokio",

@@ -7,18 +7,26 @@ use log::{error, warn, Level};
 use serenity::{
     async_trait,
     client::bridge::gateway::ShardManager,
-    framework::{standard::macros::group, StandardFramework},
+    framework::{
+        standard::{
+            help_commands,
+            macros::{group, help},
+            Args, CommandGroup, CommandResult, HelpOptions,
+        },
+        StandardFramework,
+    },
     http::Http,
-    model::prelude::{Ready, ResumedEvent},
+    model::prelude::{Message, Ready, ResumedEvent, UserId},
     prelude::{Context, EventHandler, GatewayIntents, TypeMapKey},
     Client,
 };
 use tokio::sync::Mutex;
 
 use commands::misc::*;
+use commands::rolls::*;
 
 #[group]
-#[commands(test, uptime)]
+#[commands(ping, uptime, roll)]
 struct Everyone;
 
 struct Handler;
@@ -40,6 +48,20 @@ impl TypeMapKey for ShardManagerContainer {
     type Value = Arc<Mutex<ShardManager>>;
 }
 
+#[help]
+async fn help(
+    ctx: &Context,
+    msg: &Message,
+    args: Args,
+    help_options: &'static HelpOptions,
+    groups: &[&'static CommandGroup],
+    owners: HashSet<UserId>,
+) -> CommandResult {
+    help_commands::with_embeds(ctx, msg, args, help_options, groups, owners).await?;
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     simple_logger::init_with_level(Level::Warn)?;
@@ -55,7 +77,8 @@ async fn main() -> Result<()> {
 
     let framework = StandardFramework::new()
         .configure(|c| c.owners(HashSet::from_iter([owner])).prefix("/").allow_dm(true))
-        .group(&EVERYONE_GROUP);
+        .group(&EVERYONE_GROUP)
+        .help(&HELP);
 
     let intents = GatewayIntents::all();
 
