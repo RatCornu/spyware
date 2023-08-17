@@ -1,6 +1,6 @@
 mod commands;
 
-use std::{collections::HashSet, env, sync::Arc};
+use std::{collections::HashSet, env, os::windows::prelude::AsHandle, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use log::{error, warn, Level};
@@ -26,7 +26,7 @@ use commands::misc::*;
 use commands::rolls::*;
 
 #[group]
-#[commands(ping, uptime, roll)]
+#[commands(ping, uptime, roll, session)]
 struct Everyone;
 
 struct Handler;
@@ -82,6 +82,8 @@ async fn main() -> Result<()> {
 
     let intents = GatewayIntents::all();
 
+    init_csv().await?;
+
     let mut client = Client::builder(token, intents).framework(framework).event_handler(Handler).await?;
 
     {
@@ -94,6 +96,16 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
         shard_manager.lock().await.shutdown_all().await;
+    });
+
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            {
+                let mut current_roll_session = CURRENT_ROLL_SESSION.get().unwrap().lock().unwrap();
+                current_roll_session.flush().unwrap();
+            }
+        }
     });
 
     if let Err(err) = client.start().await {

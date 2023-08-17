@@ -1,2 +1,5 @@
-/target
 .env
+
+/target
+/rolls/*.csv
+/rolls/sessions.txt
