@@ -1,10 +1,9 @@
 use chrono::{DateTime, Utc};
 use once_cell::sync::Lazy;
-use serenity::{
-    framework::standard::{macros::command, CommandResult},
-    model::prelude::Message,
-    prelude::Context,
-};
+use serenity::framework::standard::macros::command;
+use serenity::framework::standard::CommandResult;
+use serenity::model::prelude::Message;
+use serenity::prelude::Context;
 
 pub static STARTING_TIME: Lazy<DateTime<Utc>> = Lazy::new(|| Utc::now());
 

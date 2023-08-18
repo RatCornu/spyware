@@ -1,32 +1,26 @@
 mod commands;
 
-use std::{collections::HashSet, env, os::windows::prelude::AsHandle, sync::Arc, time::Duration};
+use std::collections::HashSet;
+use std::env;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
-use log::{error, warn, Level};
-use serenity::{
-    async_trait,
-    client::bridge::gateway::ShardManager,
-    framework::{
-        standard::{
-            help_commands,
-            macros::{group, help},
-            Args, CommandGroup, CommandResult, HelpOptions,
-        },
-        StandardFramework,
-    },
-    http::Http,
-    model::prelude::{Message, Ready, ResumedEvent, UserId},
-    prelude::{Context, EventHandler, GatewayIntents, TypeMapKey},
-    Client,
-};
-use tokio::sync::Mutex;
-
 use commands::misc::*;
 use commands::rolls::*;
+use log::{error, warn, Level};
+use serenity::client::bridge::gateway::ShardManager;
+use serenity::framework::standard::macros::{group, help};
+use serenity::framework::standard::{help_commands, Args, CommandGroup, CommandResult, HelpOptions};
+use serenity::framework::StandardFramework;
+use serenity::http::Http;
+use serenity::model::prelude::{Message, Ready, ResumedEvent, UserId};
+use serenity::prelude::{Context, EventHandler, GatewayIntents, TypeMapKey};
+use serenity::{async_trait, Client};
+use tokio::sync::Mutex;
 
 #[group]
-#[commands(ping, uptime, roll, session)]
+#[commands(ping, uptime, roll, session, stats)]
 struct Everyone;
 
 struct Handler;
@@ -102,8 +96,8 @@ async fn main() -> Result<()> {
         loop {
             tokio::time::sleep(Duration::from_secs(10)).await;
             {
-                let mut current_roll_session = CURRENT_ROLL_SESSION.get().unwrap().lock().unwrap();
-                current_roll_session.flush().unwrap();
+                let mut current_roll_session_writer = CURRENT_ROLL_SESSION_WRITER.get().unwrap().lock().unwrap();
+                current_roll_session_writer.flush().unwrap();
             }
         }
     });
