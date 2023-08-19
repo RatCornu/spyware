@@ -1,13 +1,66 @@
+#![deny(
+    clippy::complexity,
+    clippy::correctness,
+    clippy::nursery,
+    clippy::pedantic,
+    clippy::perf,
+    clippy::restriction,
+    clippy::style
+)]
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::blanket_clippy_restriction_lints,
+    clippy::else_if_without_else,
+    clippy::exhaustive_enums,
+    clippy::exhaustive_structs,
+    clippy::expect_used,
+    clippy::implicit_return,
+    clippy::integer_arithmetic,
+    clippy::integer_division,
+    clippy::match_same_arms,
+    clippy::match_wildcard_for_single_variants,
+    clippy::missing_trait_methods,
+    clippy::mod_module_files,
+    clippy::non_ascii_literal,
+    clippy::panic,
+    clippy::panic_in_result_fn,
+    clippy::pattern_type_mismatch,
+    clippy::question_mark_used,
+    clippy::separated_literal_suffix,
+    clippy::single_call_fn,
+    clippy::shadow_reuse,
+    clippy::shadow_unrelated,
+    clippy::std_instead_of_core,
+    clippy::unreachable,
+    clippy::unwrap_in_result,
+    clippy::wildcard_in_or_patterns,
+    const_item_mutation
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::assertions_on_result_states,
+        clippy::collection_is_never_read,
+        clippy::enum_glob_use,
+        clippy::indexing_slicing,
+        clippy::non_ascii_literal,
+        clippy::too_many_lines,
+        clippy::unwrap_used,
+        clippy::wildcard_imports
+    )
+)]
+
+extern crate alloc;
+
 mod commands;
 
+use alloc::sync::Arc;
 use std::collections::HashSet;
 use std::env;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use commands::misc::*;
-use commands::rolls::*;
 use log::{error, warn, Level};
 use serenity::client::bridge::gateway::ShardManager;
 use serenity::framework::standard::macros::{group, help};
@@ -19,10 +72,16 @@ use serenity::prelude::{Context, EventHandler, GatewayIntents, TypeMapKey};
 use serenity::{async_trait, Client};
 use tokio::sync::Mutex;
 
+#[allow(clippy::wildcard_imports)]
+use crate::commands::misc::*;
+#[allow(clippy::wildcard_imports)]
+use crate::commands::rolls::*;
+
 #[group]
 #[commands(ping, uptime, roll, session, stats)]
 struct Everyone;
 
+/// Simple event handler for serenity
 struct Handler;
 
 #[async_trait]
@@ -32,7 +91,7 @@ impl EventHandler for Handler {
     }
 
     async fn resume(&self, _: Context, _: ResumedEvent) {
-        warn!("Prêt de nouveau !")
+        warn!("Prêt de nouveau !");
     }
 }
 
@@ -70,7 +129,7 @@ async fn main() -> Result<()> {
     };
 
     let framework = StandardFramework::new()
-        .configure(|c| c.owners(HashSet::from_iter([owner])).prefix("/").allow_dm(true))
+        .configure(|configuration| configuration.owners(HashSet::from_iter([owner])).prefix("/").allow_dm(true))
         .group(&EVERYONE_GROUP)
         .help(&HELP);
 
@@ -82,13 +141,13 @@ async fn main() -> Result<()> {
 
     {
         let mut data = client.data.write().await;
-        data.insert::<ShardManagerContainer>(client.shard_manager.clone());
-    }
+        data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
+    };
 
-    let shard_manager = client.shard_manager.clone();
+    let shard_manager = Arc::clone(&client.shard_manager);
 
     tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.unwrap();
+        tokio::signal::ctrl_c().await.expect("Could not handle SIGINT signal");
         shard_manager.lock().await.shutdown_all().await;
     });
 
@@ -96,8 +155,12 @@ async fn main() -> Result<()> {
         loop {
             tokio::time::sleep(Duration::from_secs(10)).await;
             {
-                let mut current_roll_session_writer = CURRENT_ROLL_SESSION_WRITER.get().unwrap().lock().unwrap();
-                current_roll_session_writer.flush().unwrap();
+                let mut current_roll_session_writer =
+                    // SAFETY: at this point, `CURRENT_ROLL_SESSION_WRITER` is set
+                    unsafe { CURRENT_ROLL_SESSION_WRITER.get().unwrap_unchecked() }.lock().expect("Could not lock `CURRENT_ROLL_SESSION_WRITER`");
+                current_roll_session_writer
+                    .flush()
+                    .expect("Could not flush the current roll session writer");
             }
         }
     });

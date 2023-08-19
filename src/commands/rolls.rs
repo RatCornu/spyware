@@ -193,12 +193,12 @@ pub async fn stats(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
         let mut sessions = File::options().read(true).open("rolls/sessions.txt").unwrap();
         let mut content = String::new();
         sessions.read_to_string(&mut content).unwrap();
-        let mut sessions = content.split("\n").map(ToOwned::to_owned).collect::<Vec<String>>();
+        let mut sessions = content.split('\n').map(ToOwned::to_owned).collect::<Vec<String>>();
         sessions.pop();
         sessions
     } else {
-        let binding = CURRENT_ROLL_SESSION.lock().unwrap();
-        vec![<String as AsRef<str>>::as_ref(&binding).to_owned().to_owned()]
+        let binding = CURRENT_ROLL_SESSION.lock().expect("Could not lock `CURRENT_ROLL_SESSION`");
+        vec![<String as AsRef<str>>::as_ref(&binding).to_owned().clone()]
     };
 
     todo!("Renvoyer les données");
