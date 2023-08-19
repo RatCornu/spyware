@@ -63,8 +63,8 @@ use std::time::Duration;
 use anyhow::Result;
 use log::{error, warn, Level};
 use serenity::client::bridge::gateway::ShardManager;
-use serenity::framework::standard::macros::{group, help};
-use serenity::framework::standard::{help_commands, Args, CommandGroup, CommandResult, HelpOptions};
+use serenity::framework::standard::macros::{group, help, hook};
+use serenity::framework::standard::{help_commands, Args, CommandError, CommandGroup, CommandResult, HelpOptions};
 use serenity::framework::StandardFramework;
 use serenity::http::Http;
 use serenity::model::prelude::{Message, Ready, ResumedEvent, UserId};
@@ -115,6 +115,13 @@ async fn help(
     Ok(())
 }
 
+#[hook]
+async fn after_hook(_ctx: &Context, msg: &Message, command_name: &str, result: Result<(), CommandError>) {
+    if let Err(err) = result {
+        error!("Erreur renvoyée par la commande {} dans le message \"{}\": {}", command_name, msg.content, err);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     simple_logger::init_with_level(Level::Warn)?;
@@ -131,7 +138,8 @@ async fn main() -> Result<()> {
     let framework = StandardFramework::new()
         .configure(|configuration| configuration.owners(HashSet::from_iter([owner])).prefix("/").allow_dm(true))
         .group(&EVERYONE_GROUP)
-        .help(&HELP);
+        .help(&HELP)
+        .after(after_hook);
 
     let intents = GatewayIntents::all();
 

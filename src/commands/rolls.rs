@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use chrono::Utc;
 use csv::{Reader, Writer};
+use derive_more::{Deref, DerefMut};
 use log::error;
 use once_cell::sync::OnceCell;
 use rand::{thread_rng, Rng};
@@ -31,19 +32,49 @@ struct Roll {
     timestamp: Timestamp,
 }
 
+impl Roll {
+    /// Returns the normalized value of the roll
+    fn normalization(&self) -> f64 {
+        self.result as f64 / self.sides as f64
+    }
+}
+
+#[derive(Deref, DerefMut)]
+struct Rolls(Vec<Roll>);
+
+impl Rolls {
+    fn normalized_avg(&self) -> f64 {
+        self.0.iter().fold(0_f64, |acc, roll| acc + roll.normalization()) / self.0.len() as f64
+    }
+
+    fn normalized_sd(&self) -> f64 {
+        ((self.iter().fold(0_f64, |acc, roll| acc + roll.normalization().powi(2))) / self.0.len() as f64
+            - self.normalized_avg().powi(2))
+        .sqrt()
+    }
+}
+
 /// Updates the content of [`CURRENT_ROLL_SESSION`] and [`CURRENT_ROLL_SESSION_WRITER`] to match path given
 async fn update_session(new_file: &str) -> Result<()> {
-    CURRENT_ROLL_SESSION.lock().as_mut().unwrap().clone_from(&new_file.to_owned());
+    CURRENT_ROLL_SESSION
+        .lock()
+        .as_mut()
+        .expect("Could not lock `CURRENT_ROLL_SESSION`")
+        .clone_from(&new_file.to_owned());
 
     let current_roll_session_writer = CURRENT_ROLL_SESSION_WRITER.get_or_init(|| {
         Arc::new(Mutex::new(Writer::from_writer(
-            File::options().append(true).create(true).open("./rolls/".to_owned() + &new_file).unwrap(),
+            File::options()
+                .append(true)
+                .create(true)
+                .open("./rolls/".to_owned() + &new_file)
+                .expect("Could not open session file"),
         )))
     });
 
-    let mut binder = current_roll_session_writer.lock().unwrap();
+    let mut binder = current_roll_session_writer.lock().expect("Could not lock `CURRENT_ROLL_SESSION_WRITER`");
     binder.flush()?;
-    *binder = Writer::from_writer(File::options().append(true).create(true).open("./rolls/".to_owned() + &new_file).unwrap());
+    *binder = Writer::from_writer(File::options().append(true).create(true).open("./rolls/".to_owned() + &new_file)?);
 
     Ok(())
 }
@@ -54,6 +85,11 @@ async fn new_session() -> Result<()> {
     let new_file = Utc::now().format("%Y-%m-%d_%H-%M-%S.csv").to_string();
     session_file.write_all((new_file.clone() + "\n").as_bytes())?;
     update_session(&new_file).await?;
+
+    let current_roll_session_writer = CURRENT_ROLL_SESSION_WRITER.get().unwrap();
+    let mut binder = current_roll_session_writer.lock().unwrap();
+    binder.write_record(["user_id", "result", "sides", "timestamp"])?;
+    binder.flush()?;
 
     Ok(())
 }
@@ -91,8 +127,8 @@ pub async fn init_csv() -> Result<()> {
 #[example("1d100")]
 pub async fn roll(ctx: &Context, msg: &Message, rolls: Args) -> CommandResult {
     let mut parsed_args = Args::new(rolls.message(), &[Delimiter::Single('d'), Delimiter::Single(' ')]);
-    let nb_dices = parsed_args.single::<u32>().unwrap();
-    let nb_faces = parsed_args.single::<u32>().unwrap();
+    let nb_dices = parsed_args.single::<u32>()?;
+    let nb_faces = parsed_args.single::<u32>()?;
 
     let mut results = Vec::<u32>::new();
     for _ in 0..nb_dices {
@@ -103,7 +139,8 @@ pub async fn roll(ctx: &Context, msg: &Message, rolls: Args) -> CommandResult {
         error!("Tried to roll 0 dice");
     } else {
         let mut iter_results = results.iter();
-        let first_result = iter_results.next().unwrap();
+        // SAFETY: it is checked that `results` contains at least one element
+        let first_result = unsafe { iter_results.next().unwrap_unchecked() };
         match msg
             .channel_id
             .say(
@@ -118,11 +155,13 @@ pub async fn roll(ctx: &Context, msg: &Message, rolls: Args) -> CommandResult {
         {
             Ok(sent_message) if nb_dices == 1 && first_result == &69 => {
                 for emoji in NICE {
-                    sent_message.react(&ctx.http, emoji).await.unwrap();
+                    sent_message.react(&ctx.http, emoji).await?;
                 }
             },
             Ok(_) => {
-                let mut current_roll_session_writer = CURRENT_ROLL_SESSION_WRITER.get().unwrap().lock().unwrap();
+                let mut current_roll_session_writer =
+                    // SAFETY: at this point, `CURRENT_ROLL_SESSION_WRITER` is initialized
+                    unsafe { CURRENT_ROLL_SESSION_WRITER.get().unwrap_unchecked() }.lock().expect("Could not lock `CURRENT_ROLL_SESSION_WRITER`");
                 results.iter().for_each(|result| {
                     current_roll_session_writer
                         .write_record([
@@ -131,12 +170,12 @@ pub async fn roll(ctx: &Context, msg: &Message, rolls: Args) -> CommandResult {
                             nb_faces.to_string(),
                             msg.timestamp.to_string(),
                         ])
-                        .unwrap();
+                        .expect("Could not write a record in the current session");
                 });
             },
             Err(_) => {
                 error!("Tried to roll {}d{} which is too large for one message", nb_dices, nb_faces);
-                msg.channel_id.say(&ctx.http, "Le nombre de dés jetés est trop grand !").await.unwrap();
+                msg.channel_id.say(&ctx.http, "Le nombre de dés jetés est trop grand !").await?;
             },
         }
     }
@@ -149,8 +188,8 @@ pub async fn roll(ctx: &Context, msg: &Message, rolls: Args) -> CommandResult {
 #[description("Crée une nouvelle session de jets")]
 #[usage("")]
 pub async fn session(ctx: &Context, msg: &Message) -> CommandResult {
-    new_session().await.unwrap();
-    msg.channel_id.say(&ctx.http, "Une nouvelle session vient de débuter !").await.unwrap();
+    new_session().await?;
+    msg.channel_id.say(&ctx.http, "Une nouvelle session vient de débuter !").await?;
 
     Ok(())
 }
@@ -164,33 +203,49 @@ pub async fn session(ctx: &Context, msg: &Message) -> CommandResult {
 #[example("d50 @test")]
 #[example("* d100")]
 pub async fn stats(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    unsafe { CURRENT_ROLL_SESSION_WRITER.get_unchecked() }
+        .lock()
+        .as_mut()
+        .expect("Could not lock `CURRENT_ROLL_SESSION_WRITER`")
+        .flush()
+        .unwrap();
+
     let mut is_all_rolls = false;
-    let mut faces_per_dice: Option<u32> = None;
-    let mut user_id: Option<UserId> = None;
+    let mut faces_per_dice_opt: Option<u32> = None;
+    let mut user_id_opt: Option<UserId> = None;
 
     for packed_arg in args.iter::<String>() {
-        let arg = packed_arg.unwrap();
+        let arg = packed_arg?;
         if arg.is_empty() {
             error!("L'argument donné est vide");
         } else if arg == "*" {
             is_all_rolls = true;
-        } else if arg.chars().nth(0).unwrap() == 'd' {
+        } else if
+        // SAFETY: it is checked that `arg` contains at least one char
+        unsafe { arg.chars().nth(0).unwrap_unchecked() } == 'd' {
             let mut chars = arg.chars();
             chars.next();
-            faces_per_dice = Some(u32::from_str(chars.as_str()).unwrap());
-        } else if arg.chars().nth(0).unwrap() == '<' && arg.chars().nth(1).unwrap() == '@' && arg.chars().last().unwrap() == '>' {
+            faces_per_dice_opt = Some(u32::from_str(chars.as_str()).unwrap());
+        } else if
+        // SAFETY: the format of a user ping in discord is "\<@<u64>\>"
+        unsafe { arg.chars().nth(0).unwrap_unchecked() } == '<'
+        // SAFETY: the format of a user ping in discord is "\<@<u64>\>"
+            && unsafe { arg.chars().nth(1).unwrap_unchecked() } == '@'
+        // SAFETY: the format of a user ping in discord is "\<@<u64>\>"
+            && unsafe { arg.chars().last().unwrap_unchecked() } == '>'
+        {
             let mut chars = arg.chars();
             chars.next();
             chars.next();
             chars.next_back();
-            user_id = Some(UserId(u64::from_str(chars.as_str()).unwrap()))
+            user_id_opt = Some(UserId(u64::from_str(chars.as_str())?))
         } else {
             error!("Argument \"{}\" invalide", arg);
         }
     }
 
     let sessions = if is_all_rolls {
-        let mut sessions = File::options().read(true).open("rolls/sessions.txt").unwrap();
+        let mut sessions = File::options().read(true).open("rolls/sessions.txt")?;
         let mut content = String::new();
         sessions.read_to_string(&mut content).unwrap();
         let mut sessions = content.split('\n').map(ToOwned::to_owned).collect::<Vec<String>>();
@@ -201,7 +256,32 @@ pub async fn stats(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
         vec![<String as AsRef<str>>::as_ref(&binding).to_owned().clone()]
     };
 
-    todo!("Renvoyer les données");
+    let rolls = Rolls(
+        sessions
+            .into_iter()
+            .map(|session| load_session(&session).expect(&format!("Could not load session {}", session)))
+            .flatten()
+            .collect::<Vec<Roll>>(),
+    );
+
+    match (faces_per_dice_opt, user_id_opt) {
+        (None, None) => {
+            msg.channel_id
+                .say(
+                    &ctx.http,
+                    format!(
+                        "Un total de {} dés ont été lancés.\nAprès normalisation, la moyenne est de {} et l'écart-type de {}.",
+                        rolls.len(),
+                        rolls.normalized_avg(),
+                        rolls.normalized_sd()
+                    ),
+                )
+                .await?;
+        },
+        (Some(faces_per_dice), None) => todo!(),
+        (None, Some(user_id)) => todo!(),
+        (Some(faces_per_dice), Some(user_id)) => todo!(),
+    };
 
     Ok(())
 }
