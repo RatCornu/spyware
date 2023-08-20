@@ -1,3 +1,5 @@
+//! `Spyware`
+
 #![deny(
     clippy::complexity,
     clippy::correctness,
@@ -11,12 +13,13 @@
     clippy::arithmetic_side_effects,
     clippy::as_conversions,
     clippy::blanket_clippy_restriction_lints,
+    clippy::cast_precision_loss,
     clippy::else_if_without_else,
     clippy::exhaustive_enums,
     clippy::exhaustive_structs,
     clippy::expect_used,
+    clippy::float_arithmetic,
     clippy::implicit_return,
-    clippy::integer_arithmetic,
     clippy::integer_division,
     clippy::match_same_arms,
     clippy::match_wildcard_for_single_variants,
@@ -32,6 +35,7 @@
     clippy::shadow_reuse,
     clippy::shadow_unrelated,
     clippy::std_instead_of_core,
+    clippy::string_add,
     clippy::unreachable,
     clippy::unwrap_in_result,
     clippy::wildcard_in_or_patterns,
@@ -143,7 +147,7 @@ async fn main() -> Result<()> {
 
     let intents = GatewayIntents::all();
 
-    init_csv().await?;
+    init_csv()?;
 
     let mut client = Client::builder(token, intents).framework(framework).event_handler(Handler).await?;
 

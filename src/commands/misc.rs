@@ -1,3 +1,5 @@
+//! Miscellianous commands
+
 use chrono::{DateTime, Utc};
 use once_cell::sync::Lazy;
 use serenity::framework::standard::macros::command;
@@ -5,7 +7,8 @@ use serenity::framework::standard::CommandResult;
 use serenity::model::prelude::Message;
 use serenity::prelude::Context;
 
-pub static STARTING_TIME: Lazy<DateTime<Utc>> = Lazy::new(|| Utc::now());
+/// Time at which the bot is started
+pub static STARTING_TIME: Lazy<DateTime<Utc>> = Lazy::new(Utc::now);
 
 #[command]
 #[num_args(0)]
