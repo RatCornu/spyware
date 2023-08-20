@@ -74,15 +74,18 @@ use serenity::http::Http;
 use serenity::model::prelude::{Message, Ready, ResumedEvent, UserId};
 use serenity::prelude::{Context, EventHandler, GatewayIntents, TypeMapKey};
 use serenity::{async_trait, Client};
+use songbird::SerenityInit;
 use tokio::sync::Mutex;
 
 #[allow(clippy::wildcard_imports)]
 use crate::commands::misc::*;
 #[allow(clippy::wildcard_imports)]
+use crate::commands::music::*;
+#[allow(clippy::wildcard_imports)]
 use crate::commands::rolls::*;
 
 #[group]
-#[commands(ping, uptime, roll, session, stats)]
+#[commands(ping, uptime, roll, session, stats, join)]
 struct Everyone;
 
 /// Simple event handler for serenity
@@ -149,7 +152,11 @@ async fn main() -> Result<()> {
 
     init_csv()?;
 
-    let mut client = Client::builder(token, intents).framework(framework).event_handler(Handler).await?;
+    let mut client = Client::builder(token, intents)
+        .framework(framework)
+        .register_songbird()
+        .event_handler(Handler)
+        .await?;
 
     {
         let mut data = client.data.write().await;

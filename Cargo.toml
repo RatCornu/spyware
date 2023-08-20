@@ -18,4 +18,5 @@ rand = "0.8"
 serde = "1"
 serenity = "0.11"
 simple_logger = "4"
+songbird = "0.3"
 tokio = { version = "1", features = ["macros", "signal", "rt-multi-thread", "time"] }
