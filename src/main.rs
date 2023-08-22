@@ -85,7 +85,7 @@ use crate::commands::music::*;
 use crate::commands::rolls::*;
 
 #[group]
-#[commands(ping, uptime, roll, session, stats, join)]
+#[commands(ping, uptime, roll, session, stats, play)]
 struct Everyone;
 
 /// Simple event handler for serenity

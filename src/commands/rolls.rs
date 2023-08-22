@@ -2,7 +2,7 @@
 
 use alloc::sync::Arc;
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::str::FromStr;
 use std::sync::Mutex;
 
@@ -41,7 +41,7 @@ struct Roll {
     sides: u32,
 
     /// Timestamp of the roll
-    _timestamp: Timestamp,
+    timestamp: Timestamp,
 }
 
 impl Roll {
@@ -149,7 +149,9 @@ fn load_session(file: &str) -> Result<Vec<Roll>> {
 
 /// Initializes the roll saving system in CSV files
 pub fn init_csv() -> Result<()> {
-    let content = fs::read_to_string("rolls/sessions.txt")?;
+    let mut session_file = File::options().read(true).append(true).create(true).open("./rolls/sessions.txt")?;
+    let mut content = String::new();
+    session_file.read_to_string(&mut content)?;
 
     match content.lines().last() {
         None => new_session()?,

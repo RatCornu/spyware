@@ -3,3 +3,4 @@
 /target
 /rolls/*.csv
 /rolls/sessions.txt
+/music_cache/*.mp3
