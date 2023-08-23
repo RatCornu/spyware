@@ -149,6 +149,7 @@ fn load_session(file: &str) -> Result<Vec<Roll>> {
 }
 
 /// Initializes the roll saving system in CSV files
+#[allow(clippy::verbose_file_reads)]
 pub fn init_csv() -> Result<()> {
     let mut session_file = File::options().read(true).append(true).create(true).open("./rolls/sessions.txt")?;
     let mut content = String::new();
