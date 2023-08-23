@@ -41,6 +41,7 @@ struct Roll {
     sides: u32,
 
     /// Timestamp of the roll
+    #[allow(unused)]
     timestamp: Timestamp,
 }
 

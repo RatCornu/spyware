@@ -89,8 +89,8 @@ pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
     let handler_lock = manager.get(guild.id).unwrap_or_else(|| unreachable!("The guild is well defined"));
     let mut handler = handler_lock.lock().await;
 
-    // let path = download_audio(url, "./music_cache".into()).await?;
-    let input = songbird::input::ytdl(url).await?;
+    let path = download_audio(url, "./music_cache".into()).await?;
+    let input = songbird::input::ffmpeg(path).await?;
 
     let _song = handler.play_source(input);
 
