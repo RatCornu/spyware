@@ -60,11 +60,12 @@ extern crate alloc;
 mod commands;
 
 use alloc::sync::Arc;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::time::Duration;
 
 use anyhow::Result;
+use chrono::Utc;
 use log::{error, warn, Level};
 use serenity::client::bridge::gateway::ShardManager;
 use serenity::framework::standard::macros::{group, help, hook};
@@ -74,6 +75,7 @@ use serenity::http::Http;
 use serenity::model::prelude::{Message, Ready, ResumedEvent, UserId};
 use serenity::prelude::{Context, EventHandler, GatewayIntents, TypeMapKey};
 use serenity::{async_trait, Client};
+use songbird::id::GuildId;
 use songbird::SerenityInit;
 use tokio::sync::Mutex;
 
@@ -172,7 +174,7 @@ async fn main() -> Result<()> {
 
     tokio::spawn(async {
         loop {
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            tokio::time::sleep(Duration::from_secs(10 * 60)).await;
             {
                 let mut current_roll_session_writer =
                     // SAFETY: at this point, `CURRENT_ROLL_SESSION_WRITER` is set
@@ -180,6 +182,36 @@ async fn main() -> Result<()> {
                 current_roll_session_writer
                     .flush()
                     .expect("Could not flush the current roll session writer");
+            }
+        }
+    });
+
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            {
+                let mut current_play_modes = CURRENT_PLAY_MODES.lock().await;
+                let mut contextx = HashMap::<GuildId, Context>::new();
+                let mut should_leave = Vec::<GuildId>::new();
+                for (guild_id, (ctx, _timestamp)) in &*current_play_modes {
+                    contextx.insert(*guild_id, ctx.clone());
+                }
+                current_play_modes.retain(|guild_id, (_ctx, timestamp)| {
+                    if Utc::now().timestamp() - *timestamp > 5 * 60 {
+                        should_leave.push(*guild_id);
+                        false
+                    } else {
+                        true
+                    }
+                });
+                drop(current_play_modes);
+                for guild_id in should_leave {
+                    let ctx = contextx.get(&guild_id).expect("");
+                    let manager = songbird::get(ctx).await.expect("");
+                    if let Err(err) = leave(guild_id, manager).await {
+                        error!("Error in guild {guild_id}: {err:?}");
+                    }
+                }
             }
         }
     });
