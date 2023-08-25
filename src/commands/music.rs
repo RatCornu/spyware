@@ -82,6 +82,10 @@ pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
     let guild = unsafe { msg.guild(&ctx.cache).unwrap_unchecked() };
     let channel_id_opt = guild.voice_states.get(&msg.author.id).and_then(|voice_state| voice_state.channel_id);
 
+    let mut current_play_modes = CURRENT_PLAY_MODES.lock().await;
+    current_play_modes.remove(&guild.id.into());
+    drop(current_play_modes);
+
     let Some(channel_id) = channel_id_opt else {
         msg.channel_id
             .say(&ctx.http, "Vous n'êtes actuellement pas dans un salon audio !")
