@@ -3,14 +3,6 @@ name = "spyware"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "spyware"
-path = "src/main.rs"
-
-[lib]
-name = "spyware"
-path = "src/main.rs"
-
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
