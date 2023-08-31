@@ -7,6 +7,10 @@ edition = "2021"
 name = "spyware"
 path = "src/main.rs"
 
+[lib]
+name = "spyware"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
