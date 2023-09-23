@@ -3,6 +3,7 @@
 use alloc::sync::Arc;
 use std::fs::{self, File};
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Mutex;
 
@@ -11,7 +12,7 @@ use chrono::Utc;
 use csv::{Reader, Writer};
 use derive_more::{Deref, DerefMut};
 use log::error;
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use rand::{thread_rng, Rng};
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult, Delimiter};
@@ -19,8 +20,18 @@ use serenity::model::prelude::{Message, UserId};
 use serenity::model::Timestamp;
 use serenity::prelude::Context;
 
+use crate::DATA_DIR;
+
 /// Emojis needed to write "NICE" as reactions
 const NICE: [char; 4] = ['🇳', '🇮', '🇨', '🇪'];
+
+/// Directory used to store roll linked files
+static ROLL_DIR: Lazy<PathBuf> = Lazy::new(|| {
+    let mut data_dir = PathBuf::new();
+    data_dir.push(&*DATA_DIR);
+    data_dir.push("rolls");
+    data_dir
+});
 
 /// Name of the file containing the current session
 pub static CURRENT_ROLL_SESSION: Mutex<String> = Mutex::new(String::new());
@@ -102,27 +113,30 @@ fn update_session(new_file: &str) -> Result<()> {
         .expect("Could not lock `CURRENT_ROLL_SESSION`")
         .clone_from(&new_file.to_owned());
 
-    let current_roll_session_writer = CURRENT_ROLL_SESSION_WRITER.get_or_init(|| {
+    let new_file_path = Path::join(&ROLL_DIR, new_file);
+    let current_roll_session_writer = CURRENT_ROLL_SESSION_WRITER.get_or_init(move || {
         Arc::new(Mutex::new(Writer::from_writer(
             File::options()
                 .append(true)
                 .create(true)
-                .open("./rolls/".to_owned() + new_file)
+                .open(new_file_path)
                 .expect("Could not open session file"),
         )))
     });
 
+    let new_file_path = Path::join(&ROLL_DIR, new_file);
     let mut binder = current_roll_session_writer.lock().expect("Could not lock `CURRENT_ROLL_SESSION_WRITER`");
     binder.flush()?;
-    *binder = Writer::from_writer(File::options().append(true).create(true).open("./rolls/".to_owned() + new_file)?);
+    *binder = Writer::from_writer(File::options().append(true).create(true).open(new_file_path)?);
     drop(binder);
 
     Ok(())
 }
 
-/// Create a new session file, appends its name in the `./rolls/sessions.txt` file, and updates [`CURRENT_ROLL_SESSION_WRITER`]
+/// Create a new session file, appends its name in the `<DATA_DIR>/rolls/sessions.txt` file, and updates [`CURRENT_ROLL_SESSION_WRITER`]
 fn new_session() -> Result<()> {
-    let mut session_file = File::options().read(true).append(true).create(true).open("./rolls/sessions.txt")?;
+    let session_file_path = Path::join(&ROLL_DIR, "sessions.txt");
+    let mut session_file = File::options().read(true).append(true).create(true).open(session_file_path)?;
     let new_file = Utc::now().format("%Y-%m-%d_%H-%M-%S.csv").to_string();
     session_file.write_all((new_file.clone() + "\n").as_bytes())?;
     update_session(&new_file)?;
@@ -140,7 +154,8 @@ fn new_session() -> Result<()> {
 /// Take the name of a session file and return the content as a roll vector
 fn load_session(file: &str) -> Result<Vec<Roll>> {
     let mut rolls = Vec::<Roll>::new();
-    let session_file = File::options().read(true).open("./rolls/".to_owned() + file)?;
+    let session_file_path = Path::join(&ROLL_DIR, file);
+    let session_file = File::options().read(true).open(session_file_path)?;
     let mut reader = Reader::from_reader(session_file);
     for result in reader.deserialize::<Roll>() {
         rolls.push(result?);
@@ -151,7 +166,8 @@ fn load_session(file: &str) -> Result<Vec<Roll>> {
 /// Initializes the roll saving system in CSV files
 #[allow(clippy::verbose_file_reads)]
 pub fn init_csv() -> Result<()> {
-    let mut session_file = File::options().read(true).append(true).create(true).open("./rolls/sessions.txt")?;
+    let session_file_path = Path::join(&ROLL_DIR, "sessions.txt");
+    let mut session_file = File::options().read(true).append(true).create(true).open(session_file_path)?;
     let mut content = String::new();
     session_file.read_to_string(&mut content)?;
 
@@ -289,7 +305,8 @@ pub async fn stats(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
     }
 
     let sessions = if is_all_rolls {
-        let content = fs::read_to_string("rolls/sessions.txt")?;
+        let sessions_file_path = Path::join(&ROLL_DIR, "sessions.txt");
+        let content = fs::read_to_string(sessions_file_path)?;
         let mut sessions = content.split('\n').map(ToOwned::to_owned).collect::<Vec<String>>();
         sessions.pop();
         sessions

@@ -67,6 +67,7 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::Utc;
 use log::{error, warn, Level};
+use once_cell::sync::Lazy;
 use serenity::client::bridge::gateway::ShardManager;
 use serenity::framework::standard::macros::{group, help, hook};
 use serenity::framework::standard::{help_commands, Args, CommandError, CommandGroup, CommandResult, HelpOptions};
@@ -131,10 +132,11 @@ async fn after_hook(_ctx: &Context, msg: &Message, command_name: &str, result: R
     }
 }
 
+static DATA_DIR: Lazy<String> = Lazy::new(|| std::env::args().nth(1).expect("Must provide the data directory as argument"));
+
 #[tokio::main]
 async fn main() -> Result<()> {
     simple_logger::init_with_level(Level::Warn)?;
-    dotenv::dotenv()?;
 
     let token = env::var("DISCORD_TOKEN")?;
 

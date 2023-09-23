@@ -18,9 +18,9 @@
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit overlays system; };
         rust = pkgs.rust-bin.nightly.latest;
-      in with pkgs; rec {
+      in with pkgs; {
         packages = {
-          default = pkgs.rustPlatform.buildRustPackage {
+          spyware = pkgs.rustPlatform.buildRustPackage {
             pname = "spyware";
             version = "0.1.0";
 
@@ -30,19 +30,29 @@
               cmake
               gnumake
               libopus
+              pkg-config
+              makeWrapper
             ];
+
+            buildInputs = [
+              yt-dlp
+              ffmpeg
+            ];
+
+            postFixup = ''
+              wrapProgram $out/bin/spyware --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.yt-dlp pkgs.ffmpeg ]}
+            '';
 
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
 
             meta = with pkgs.lib; {
               description = "Bot discord pour la Foire aux Monstres";
-              homepage = "https://github.com/BathazarPatiachvili/spyware";
+              homepage = "https://github.com/RatCornu/spyware";
               license = licenses.gpl3;
             };
           };
         };
-
+        defaultPackage = self.packages.${system}.spyware;
       });
 }
-

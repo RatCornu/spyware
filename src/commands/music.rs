@@ -15,8 +15,19 @@ use songbird::id::{ChannelId, GuildId};
 use songbird::{Call, Songbird};
 use youtube_dl::{YoutubeDl, YoutubeDlOutput};
 
+use crate::DATA_DIR;
+
 /// Timestamp at which the last song played ended
 pub static CURRENT_PLAY_MODES: Lazy<Mutex<HashMap<GuildId, (Context, i64)>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+
+/// Directory used to cache musics
+static MUSIC_CACHE_DIR: Lazy<PathBuf> = Lazy::new(|| {
+    let mut data_dir = PathBuf::new();
+    data_dir.push(&*DATA_DIR);
+    data_dir.push("music_cache");
+    data_dir
+});
 
 /// Joins the given audio channel in the given guild
 async fn join<G: Into<GuildId> + Send, C: Into<ChannelId> + Send>(
@@ -96,7 +107,7 @@ pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
 
     let (_manager, handler) = join_deaf(ctx, guild.id, channel_id).await?;
 
-    let path = download_audio(url, &"./music_cache".into())?;
+    let path = download_audio(url, &MUSIC_CACHE_DIR)?;
     let input = songbird::input::ffmpeg(path).await?;
 
     let track_handle = handler.lock().await.play_source(input);
