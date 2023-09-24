@@ -2,7 +2,7 @@
 
 use alloc::sync::Arc;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
@@ -14,7 +14,7 @@ use serenity::prelude::{Context, Mutex};
 use songbird::id::{ChannelId, GuildId};
 use songbird::{Call, Songbird};
 use url::Url;
-use youtube_dl::{YoutubeDl, YoutubeDlOutput};
+use youtube_dl::YoutubeDl;
 
 use crate::DATA_DIR;
 
@@ -58,7 +58,7 @@ pub async fn leave<G: Into<GuildId> + Send>(guild_id: G, manager: Arc<Songbird>)
 }
 
 /// Downloads the video located at the given URL with youtube-dl and extracts its audio
-fn download_audio(url: String, output_folder: &PathBuf) -> Result<PathBuf> {
+fn find_audio_file(url: String, output_folder: &PathBuf) -> Result<(PathBuf, String)> {
     let mut binding = YoutubeDl::new(&url);
     let video = binding
         .extract_audio(true)
@@ -69,22 +69,24 @@ fn download_audio(url: String, output_folder: &PathBuf) -> Result<PathBuf> {
 
     let parsed_url = Url::parse(&url)?;
     let query = parsed_url.query_pairs();
-    let Some((_, video_id)) = query.filter(|(k, _)| k == "v").next() else {
+    let Some((_, audio_id)) = query.filter(|(k, _)| k == "v").next() else {
         return Err(anyhow!("Wrong url given : {}", url));
     };
 
-    let output_file_path = output_folder.join(Into::<String>::into(video_id) + ".mp3");
+    let output_file_path = output_folder.join(Into::<String>::into(audio_id.clone()) + ".mp3");
     if !output_file_path.exists() {
         video.download_to(output_folder)?;
     };
 
-    Ok(output_file_path)
+    Ok((output_file_path, audio_id.into()))
 }
 
 #[command]
 #[only_in(guilds)]
 #[num_args(1)]
-#[description("Joue une musique dans le channel audio de la personne ayant lancé la commande")]
+#[description(
+    "Joue une musique dans le channel audio de la personne ayant lancé la commande ou l'ajoute à la liste de lecture si une est déjà en cours de lecture"
+)]
 #[usage("<URL complète de youtube>")]
 #[example("https://www.youtube.com/watch?v=U2jF1KZNxME")]
 pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
@@ -108,16 +110,144 @@ pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
 
     let (_manager, handler) = join_deaf(ctx, guild.id, channel_id).await?;
 
-    let path = download_audio(url, &MUSIC_CACHE_DIR)?;
-    let input = songbird::input::ffmpeg(path).await?;
+    let (path, audio_id) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
+    let mut input = songbird::input::ffmpeg(path).await?;
+    input.metadata.source_url = Some("https://youtube.com/watch?v=".to_owned() + &audio_id);
 
-    let track_handle = handler.lock().await.play_source(input);
+    let track_handle = handler.lock().await.enqueue_source(input);
+    if let Some(web_url) = &track_handle.metadata().source_url {
+        msg.channel_id
+            .say(&ctx.http, format!("La musique {} a été ajouté à la file de lecture.", web_url))
+            .await?;
+    };
 
     while !track_handle.get_info().await?.playing.is_done() {}
 
     let mut current_play_modes = CURRENT_PLAY_MODES.lock().await;
     current_play_modes.insert(guild.id.into(), (ctx.clone(), Utc::now().timestamp()));
     drop(current_play_modes);
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+#[num_args(0)]
+#[description("Met en pause la musique actuellement jouée")]
+pub async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
+    // SAFETY: this command can only be run in guilds
+    let guild = unsafe { msg.guild(&ctx.cache).unwrap_unchecked() };
+
+    let manager = songbird::get(ctx).await.expect("Could not get songbird");
+    let Some(handler) = manager.get(guild.id) else {
+        msg.channel_id.say(&ctx.http, "Le bot n'est actuellement dans aucun salon vocal.").await?;
+        return Ok(());
+    };
+
+    let binding = handler.lock().await;
+    let queue = binding.queue();
+    queue.pause()?;
+
+    if queue.current().is_some() {
+        msg.channel_id.say(&ctx.http, "La musique a été mis en pause.").await?;
+    } else {
+        msg.channel_id
+            .say(&ctx.http, "Il n'y a actuellement aucune musique dans la liste de lecture.")
+            .await?;
+    };
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+#[num_args(0)]
+#[description("Met en pause la musique actuellement jouée")]
+pub async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
+    // SAFETY: this command can only be run in guilds
+    let guild = unsafe { msg.guild(&ctx.cache).unwrap_unchecked() };
+
+    let manager = songbird::get(ctx).await.expect("Could not get songbird");
+    let Some(handler) = manager.get(guild.id) else {
+        msg.channel_id.say(&ctx.http, "Le bot n'est actuellement dans aucun salon vocal.").await?;
+        return Ok(());
+    };
+
+    let binding = handler.lock().await;
+    let queue = binding.queue();
+    queue.resume()?;
+
+    if let Some(track) = queue.current() {
+        msg.channel_id
+            .say(
+                &ctx.http,
+                format!("La musique {} recommence à jouer.", track.metadata().source_url.as_ref().unwrap_or(&"".to_owned())),
+            )
+            .await?;
+    } else {
+        msg.channel_id
+            .say(&ctx.http, "Il n'y a actuellement aucune musique dans la liste de lecture.")
+            .await?;
+    };
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+#[num_args(0)]
+#[description("Passe la musique suivante de la liste de lecture")]
+pub async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
+    // SAFETY: this command can only be run in guilds
+    let guild = unsafe { msg.guild(&ctx.cache).unwrap_unchecked() };
+
+    let manager = songbird::get(ctx).await.expect("Could not get songbird");
+    let Some(handler) = manager.get(guild.id) else {
+        msg.channel_id.say(&ctx.http, "Le bot n'est actuellement dans aucun salon vocal.").await?;
+        return Ok(());
+    };
+
+    let binding = handler.lock().await;
+    let queue = binding.queue();
+    queue.skip()?;
+
+    if let Some(track) = queue.current() {
+        msg.channel_id
+            .say(
+                &ctx.http,
+                format!("La musique {} commence à jouer.", track.metadata().source_url.as_ref().unwrap_or(&"".to_owned())),
+            )
+            .await?;
+    } else {
+        msg.channel_id
+            .say(&ctx.http, "Il n'y a plus aucune musique dans la liste de lecture.")
+            .await?;
+    };
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+#[num_args(0)]
+#[description("Stoppe la musique et vide la liste de lecture")]
+pub async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
+    // SAFETY: this command can only be run in guilds
+    let guild = unsafe { msg.guild(&ctx.cache).unwrap_unchecked() };
+
+    let manager = songbird::get(ctx).await.expect("Could not get songbird");
+    let Some(handler) = manager.get(guild.id) else {
+        msg.channel_id.say(&ctx.http, "Le bot n'est actuellement dans aucun salon vocal.").await?;
+        return Ok(());
+    };
+
+    let binding = handler.lock().await;
+    let queue = binding.queue();
+    queue.stop();
+
+    msg.channel_id.say(&ctx.http, "La liste de lecture a été vidée.").await?;
+
+    leave(guild.id, manager).await?;
 
     Ok(())
 }
