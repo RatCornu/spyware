@@ -17,4 +17,5 @@ serenity = "0.11"
 simple_logger = "4"
 songbird = "0.3"
 tokio = { version = "1", features = ["macros", "signal", "rt-multi-thread", "time"] }
+url = "2"
 youtube_dl = "0.9"

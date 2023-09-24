@@ -1708,6 +1708,7 @@ dependencies = [
  "simple_logger",
  "songbird",
  "tokio",
+ "url",
  "youtube_dl",
 ]
 

@@ -1,10 +1,11 @@
 //! Commands to play music
 
 use alloc::sync::Arc;
+use url::Url;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use once_cell::sync::Lazy;
 use serenity::framework::standard::macros::command;
@@ -59,7 +60,7 @@ pub async fn leave<G: Into<GuildId> + Send>(guild_id: G, manager: Arc<Songbird>)
 
 /// Downloads the video located at the given URL with youtube-dl and extracts its audio
 fn download_audio(url: String, output_folder: &PathBuf) -> Result<PathBuf> {
-    let mut binding = YoutubeDl::new(url);
+    let mut binding = YoutubeDl::new(&url);
     let video = binding
         .extract_audio(true)
         .socket_timeout("15")
@@ -67,17 +68,16 @@ fn download_audio(url: String, output_folder: &PathBuf) -> Result<PathBuf> {
         .extra_arg("mp3")
         .output_template("%(id)s.%(ext)s");
 
-    let output = video.run()?;
+    let parsed_url = Url::parse(&url)?;
+    let query = parsed_url.query_pairs();
+    let Some((_, video_id)) = query.filter(|(k, _)| k == "v").next() else { return Err(anyhow!("Wrong url given : {}", url)); };
 
-    video.download_to(output_folder)?;
+    let output_file_path = output_folder.join(Into::<String>::into(video_id) + ".mp3");
+    if !output_file_path.exists() {
+        video.download_to(output_folder)?;
+    };
 
-    match output {
-        YoutubeDlOutput::SingleVideo(video) => {
-            let output_file = output_folder.to_str().expect("Could not convert the output file to a string").to_owned();
-            Ok(PathBuf::from(output_file + "/" + video.id.as_str() + ".mp3"))
-        },
-        YoutubeDlOutput::Playlist(_) => todo!(),
-    }
+    Ok(output_file_path)
 }
 
 #[command]
