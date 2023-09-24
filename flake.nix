@@ -17,7 +17,7 @@
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit overlays system; };
-        rust = pkgs.rust-bin.nightly.latest;
+        rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
       in with pkgs; {
         packages = {
           spyware = pkgs.rustPlatform.buildRustPackage {
@@ -25,7 +25,7 @@
             version = "0.1.0";
 
             nativeBuildInputs = [
-              rust.minimal
+              rust
               gcc
               cmake
               gnumake

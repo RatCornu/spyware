@@ -1,11 +1,10 @@
 //! Commands to play music
 
 use alloc::sync::Arc;
-use url::Url;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::Utc;
 use once_cell::sync::Lazy;
 use serenity::framework::standard::macros::command;
@@ -14,13 +13,13 @@ use serenity::model::prelude::Message;
 use serenity::prelude::{Context, Mutex};
 use songbird::id::{ChannelId, GuildId};
 use songbird::{Call, Songbird};
+use url::Url;
 use youtube_dl::{YoutubeDl, YoutubeDlOutput};
 
 use crate::DATA_DIR;
 
 /// Timestamp at which the last song played ended
 pub static CURRENT_PLAY_MODES: Lazy<Mutex<HashMap<GuildId, (Context, i64)>>> = Lazy::new(|| Mutex::new(HashMap::new()));
-
 
 /// Directory used to cache musics
 static MUSIC_CACHE_DIR: Lazy<PathBuf> = Lazy::new(|| {
@@ -70,7 +69,9 @@ fn download_audio(url: String, output_folder: &PathBuf) -> Result<PathBuf> {
 
     let parsed_url = Url::parse(&url)?;
     let query = parsed_url.query_pairs();
-    let Some((_, video_id)) = query.filter(|(k, _)| k == "v").next() else { return Err(anyhow!("Wrong url given : {}", url)); };
+    let Some((_, video_id)) = query.filter(|(k, _)| k == "v").next() else {
+        return Err(anyhow!("Wrong url given : {}", url));
+    };
 
     let output_file_path = output_folder.join(Into::<String>::into(video_id) + ".mp3");
     if !output_file_path.exists() {

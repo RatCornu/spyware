@@ -133,7 +133,8 @@ fn update_session(new_file: &str) -> Result<()> {
     Ok(())
 }
 
-/// Create a new session file, appends its name in the `<DATA_DIR>/rolls/sessions.txt` file, and updates [`CURRENT_ROLL_SESSION_WRITER`]
+/// Create a new session file, appends its name in the `<DATA_DIR>/rolls/sessions.txt` file, and updates
+/// [`CURRENT_ROLL_SESSION_WRITER`]
 fn new_session() -> Result<()> {
     let session_file_path = Path::join(&ROLL_DIR, "sessions.txt");
     let mut session_file = File::options().read(true).append(true).create(true).open(session_file_path)?;
