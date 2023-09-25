@@ -251,3 +251,20 @@ pub async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
 
     Ok(())
 }
+
+#[command]
+#[only_in(guilds)]
+#[num_args(1)]
+#[description("S'assure qu'une musique est téléchargée pour pouvoir la jouer instantanément")]
+#[usage("<URL complète de youtube>")]
+#[example("https://www.youtube.com/watch?v=U2jF1KZNxME")]
+pub async fn ensure(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let url = args.single::<String>()?;
+
+    let (_, audio_id) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
+    msg.channel_id
+        .say(&ctx.http, format!("La musique https://youtube.com/watch?v={} est bien disponible.", audio_id))
+        .await?;
+
+    Ok(())
+}
