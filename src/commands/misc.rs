@@ -13,7 +13,6 @@ pub static STARTING_TIME: Lazy<DateTime<Utc>> = Lazy::new(Utc::now);
 #[command]
 #[num_args(0)]
 #[description("Teste que le bot est bien connecté")]
-#[usage("")]
 pub async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
     msg.channel_id.say(&ctx.http, "Pong").await?;
 
@@ -23,7 +22,6 @@ pub async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[num_args(0)]
 #[description("Renvoie le temps depuis lequel le bot est en ligne")]
-#[usage("")]
 pub async fn uptime(ctx: &Context, msg: &Message) -> CommandResult {
     let uptime_seconds = Utc::now().timestamp() - STARTING_TIME.timestamp();
 
@@ -33,6 +31,15 @@ pub async fn uptime(ctx: &Context, msg: &Message) -> CommandResult {
             format!("Je suis actif sans interruption depuis {}s (en gros {} jours)", uptime_seconds, uptime_seconds / 86400),
         )
         .await?;
+
+    Ok(())
+}
+
+#[command]
+#[num_args(0)]
+#[description("Commande nulle à chier")]
+pub async fn quoi(ctx: &Context, msg: &Message) -> CommandResult {
+    msg.reply(&ctx.http, "Quoicoubeh").await?;
 
     Ok(())
 }
