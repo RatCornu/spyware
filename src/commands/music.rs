@@ -246,8 +246,6 @@ pub async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
 
     msg.channel_id.say(&ctx.http, "La liste de lecture a été vidée.").await?;
 
-    leave(guild.id, manager).await?;
-
     Ok(())
 }
 
