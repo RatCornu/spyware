@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
-use chrono::Utc;
 use once_cell::sync::Lazy;
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult};
@@ -19,7 +18,7 @@ use youtube_dl::YoutubeDl;
 use crate::DATA_DIR;
 
 /// Timestamp at which the last song played ended
-pub static CURRENT_PLAY_MODES: Lazy<Mutex<HashMap<GuildId, (Context, i64)>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+pub static CURRENT_PLAY_MODES: Lazy<Mutex<HashMap<GuildId, Context>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Directory used to cache musics
 static MUSIC_CACHE_DIR: Lazy<PathBuf> = Lazy::new(|| {
@@ -124,7 +123,7 @@ pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
     while !track_handle.get_info().await?.playing.is_done() {}
 
     let mut current_play_modes = CURRENT_PLAY_MODES.lock().await;
-    current_play_modes.insert(guild.id.into(), (ctx.clone(), Utc::now().timestamp()));
+    current_play_modes.insert(guild.id.into(), ctx.clone());
     drop(current_play_modes);
 
     Ok(())
