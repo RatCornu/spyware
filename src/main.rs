@@ -23,7 +23,6 @@ use serenity::model::prelude::{Message, Ready, ResumedEvent, UserId};
 use serenity::prelude::{Context, EventHandler, GatewayIntents, TypeMapKey};
 use serenity::{async_trait, Client};
 use songbird::SerenityInit;
-use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 
 #[allow(clippy::wildcard_imports)]
@@ -141,17 +140,17 @@ async fn main() -> Result<()> {
                 let mut current_play_modes = CURRENT_PLAY_MODES.lock().await;
                 let mut call_to_leave = vec![];
                 for (guild_id, ctx) in current_play_modes.iter() {
-                    let manager = songbird::get(&ctx).await.expect("");
+                    let manager = songbird::get(ctx).await.expect("");
                     let binding = manager.get(guild_id.to_owned()).expect("");
                     let call = binding.lock().await;
                     if call.queue().is_empty() {
-                        call_to_leave.push((guild_id.clone(), ctx.clone()));
+                        call_to_leave.push((*guild_id, ctx.clone()));
                     }
                 }
 
                 for (guild_id, ctx) in call_to_leave {
                     let manager = songbird::get(&ctx).await.unwrap();
-                    leave(guild_id.clone(), manager).await.unwrap();
+                    leave(guild_id, manager).await.unwrap();
                     current_play_modes.remove(&guild_id);
                 }
             }
