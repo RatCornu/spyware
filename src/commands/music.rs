@@ -2,6 +2,7 @@
 
 use alloc::sync::Arc;
 use std::collections::HashMap;
+use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
@@ -17,7 +18,10 @@ use youtube_dl::YoutubeDl;
 
 use crate::DATA_DIR;
 
-/// Timestamp at which the last song played ended
+/// File extension of all music files downloaded.
+pub const MUSIC_FILE_EXTENSION: &str = "mp3";
+
+/// Timestamp at which the last song played ended.
 pub static CURRENT_PLAY_MODES: Lazy<Mutex<HashMap<GuildId, Context>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Directory used to cache musics
@@ -50,34 +54,41 @@ async fn join_deaf<G: Into<GuildId> + Send, C: Into<ChannelId> + Send>(
     Ok((manager, handler))
 }
 
-/// Leaves the audio channel in the guild defined in the given `handler`
+/// Leaves the audio channel in the guild defined in the given `handler`.
 pub async fn leave<G: Into<GuildId> + Send>(guild_id: G, manager: Arc<Songbird>) -> Result<()> {
     manager.remove(guild_id).await?;
     Ok(())
 }
 
-/// Downloads the video located at the given URL with youtube-dl and extracts its audio
-fn find_audio_file(url: String, output_folder: &PathBuf) -> Result<(PathBuf, String)> {
-    let mut binding = YoutubeDl::new(&url);
+/// Downloads the video located at the given URL with youtube-dl and extracts its audio.
+///
+/// Returns the path of the created file, the name of ID of the file and if the id is an alias.
+fn find_audio_file(id: String, output_folder: &PathBuf) -> Result<(PathBuf, String, bool)> {
+    let alias_path = output_folder.join(id.clone() + "." + MUSIC_FILE_EXTENSION);
+    if alias_path.exists() {
+        return Ok((alias_path, id, true));
+    }
+
+    let mut binding = YoutubeDl::new(&id);
     let video = binding
         .extract_audio(true)
         .socket_timeout("15")
         .extra_arg("--audio-format")
-        .extra_arg("mp3")
+        .extra_arg(MUSIC_FILE_EXTENSION)
         .output_template("%(id)s.%(ext)s");
 
-    let parsed_url = Url::parse(&url)?;
-    let query = parsed_url.query_pairs();
-    let Some((_, audio_id)) = query.filter(|(k, _)| k == "v").next() else {
-        return Err(anyhow!("Wrong url given : {}", url));
+    let parsed_url = Url::parse(&id)?;
+    let mut query = parsed_url.query_pairs();
+    let Some((_, audio_id)) = query.find(|(k, _)| k == "v") else {
+        return Err(anyhow!("Wrong url given : {}", id));
     };
 
-    let output_file_path = output_folder.join(Into::<String>::into(audio_id.clone()) + ".mp3");
+    let output_file_path = output_folder.join(Into::<String>::into(audio_id.clone()) + "." + MUSIC_FILE_EXTENSION);
     if !output_file_path.exists() {
         video.download_to(output_folder)?;
     };
 
-    Ok((output_file_path, audio_id.into()))
+    Ok((output_file_path, audio_id.into(), false))
 }
 
 #[command]
@@ -109,9 +120,9 @@ pub async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
 
     let (_manager, handler) = join_deaf(ctx, guild.id, channel_id).await?;
 
-    let (path, audio_id) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
+    let (path, audio_id, is_alias) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
     let mut input = songbird::input::ffmpeg(path).await?;
-    input.metadata.source_url = Some("https://youtube.com/watch?v=".to_owned() + &audio_id);
+    input.metadata.source_url = Some(if is_alias { audio_id } else { "https://youtube.com/watch?v=".to_owned() + &audio_id });
 
     let track_handle = handler.lock().await.enqueue_source(input);
     if let Some(web_url) = &track_handle.metadata().source_url {
@@ -251,17 +262,37 @@ pub async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
-#[num_args(1)]
-#[description("S'assure qu'une musique est téléchargée pour pouvoir la jouer instantanément")]
-#[usage("<URL complète de youtube>")]
-#[example("https://www.youtube.com/watch?v=U2jF1KZNxME")]
+#[min_args(1)]
+#[max_args(2)]
+#[description(
+    "S'assure qu'une musique est téléchargée pour pouvoir la jouer instantanément, et lui donne optionnellement un alias."
+)]
+#[usage("<URL complète de youtube> <alias>")]
+#[example("https://www.youtube.com/watch?v=U2jF1KZNxME osu")]
 pub async fn ensure(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let url = args.single::<String>()?;
 
-    let (_, audio_id) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
-    msg.channel_id
-        .say(&ctx.http, format!("La musique https://youtube.com/watch?v={} est bien disponible.", audio_id))
-        .await?;
+    if args.remaining() > 0 {
+        let alias = args.single::<String>()?;
+        let (file_path, audio_id, _) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
+        let mut symlink_path = file_path.clone().parent().unwrap_or_else(|| unreachable!()).to_path_buf();
+        symlink_path.push(format!("{alias}.{MUSIC_FILE_EXTENSION}"));
+        symlink(file_path, symlink_path)?;
+        msg.channel_id
+            .say(
+                &ctx.http,
+                format!(
+                    "La musique https://youtube.com/watch?v={} est bien disponible et l'alias `{}` a été ajouté.",
+                    audio_id, alias
+                ),
+            )
+            .await?;
+    } else {
+        let (_, audio_id, _) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
+        msg.channel_id
+            .say(&ctx.http, format!("La musique https://youtube.com/watch?v={} est bien disponible.", audio_id))
+            .await?;
+    }
 
     Ok(())
 }

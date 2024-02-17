@@ -71,8 +71,12 @@ async fn help(
 }
 
 #[hook]
-async fn after_hook(_ctx: &Context, msg: &Message, command_name: &str, result: Result<(), CommandError>) {
+async fn after_hook(ctx: &Context, msg: &Message, command_name: &str, result: Result<(), CommandError>) {
     if let Err(err) = result {
+        msg.reply(&ctx.http, format!("Erreur : la commande a renvoyé le message suivant : `{err}`"))
+            .await
+            .map(|_| ())
+            .unwrap_or_default();
         error!("Erreur renvoyée par la commande {} dans le message \"{}\": {}", command_name, msg.content, err);
     }
 }
