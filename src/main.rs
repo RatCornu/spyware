@@ -5,20 +5,24 @@
 extern crate alloc;
 
 mod commands;
+mod mangas;
 
-use alloc::sync::Arc;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use log::{error, warn, Level};
+use mangas::MangaSource;
 use once_cell::sync::Lazy;
 use serenity::client::bridge::gateway::ShardManager;
 use serenity::framework::standard::macros::{group, help, hook};
 use serenity::framework::standard::{help_commands, Args, CommandError, CommandGroup, CommandResult, HelpOptions};
 use serenity::framework::StandardFramework;
-use serenity::http::Http;
+use serenity::http::{CacheHttp, Http};
+use serenity::model::channel::Reaction;
+use serenity::model::id::MessageId;
 use serenity::model::prelude::{Message, Ready, ResumedEvent, UserId};
 use serenity::prelude::{Context, EventHandler, GatewayIntents, TypeMapKey};
 use serenity::{async_trait, Client};
@@ -37,7 +41,13 @@ use crate::commands::rolls::*;
 struct Everyone;
 
 /// Simple event handler for serenity
-struct Handler;
+#[derive(Debug)]
+pub struct InnerHandler {
+    messages_with_mangas_url: HashMap<MessageId, MangaSource>,
+}
+
+#[derive(Debug)]
+pub struct Handler(pub Mutex<InnerHandler>);
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -47,6 +57,22 @@ impl EventHandler for Handler {
 
     async fn resume(&self, _: Context, _: ResumedEvent) {
         warn!("Prêt de nouveau !");
+    }
+
+    async fn message(&self, ctx: Context, message: Message) {
+        if message.author.id != ctx.http().get_current_user().await.unwrap().id {
+            if let Err(err) = mangas::detection(self, &ctx, &message).await {
+                error!("{err:?}");
+            }
+        }
+    }
+
+    async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
+        if reaction.user_id.unwrap() != ctx.http().get_current_user().await.unwrap().id {
+            if let Err(err) = mangas::handle_reaction(self, &ctx, reaction).await {
+                error!("{err:?}");
+            }
+        }
     }
 }
 
@@ -108,7 +134,9 @@ async fn main() -> Result<()> {
     let mut client = Client::builder(token, intents)
         .framework(framework)
         .register_songbird()
-        .event_handler(Handler)
+        .event_handler(Handler(Mutex::new(InnerHandler {
+            messages_with_mangas_url: HashMap::new(),
+        })))
         .await?;
 
     {

@@ -1703,6 +1703,7 @@ dependencies = [
  "log4rs",
  "once_cell",
  "rand",
+ "regex",
  "serde",
  "serenity",
  "simple_logger",
