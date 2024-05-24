@@ -18,7 +18,8 @@
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit overlays system; };
         rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-      in with pkgs; {
+      in
+      with pkgs; {
         packages = {
           spyware = pkgs.rustPlatform.buildRustPackage {
             pname = "spyware";
@@ -35,12 +36,13 @@
             ];
 
             buildInputs = [
-              yt-dlp
               ffmpeg
+              openssl
+              yt-dlp
             ];
 
             postFixup = ''
-              wrapProgram $out/bin/spyware --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.yt-dlp pkgs.ffmpeg ]}
+              wrapProgram $out/bin/spyware --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.yt-dlp pkgs.ffmpeg pkgs.openssl ]}
             '';
 
             src = ./.;

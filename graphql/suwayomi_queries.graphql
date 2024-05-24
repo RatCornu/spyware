@@ -1,0 +1,62 @@
+mutation SearchManga($manga_name: String, $source_id: LongString!) {
+  fetchSourceManga(
+    input: {query: $manga_name, source: $source_id, page: 1, type: SEARCH}
+  ) {
+    mangas {
+      title
+      id
+      inLibrary
+    }
+  }
+}
+
+mutation AddMangaToLibrary($manga_id: Int!) {
+  updateManga(
+    input: {patch: { inLibrary: true }, id: $manga_id}
+  ) {
+    manga {
+      title
+      id
+    }
+  }
+}
+
+mutation SetMangaCategory($category_id: Int!, $manga_id: Int!) {
+  updateMangaCategories(input: {id: $manga_id, patch: { addToCategories: [$category_id], clearCategories: true }})  {
+    manga {
+    	categories {
+        nodes {
+          id
+          name
+        }
+      }
+    }
+  }
+}
+
+mutation FetchMangaChapters($manga_id: Int!) {
+  fetchChapters(input: { mangaId: $manga_id }) {
+    chapters {
+      id
+      name
+      chapterNumber
+      url
+    }
+  }
+}
+
+mutation AddChaptersToDownloadQueue($chapters: [Int!]!) {
+  enqueueChapterDownloads(input: { ids: $chapters }) {
+    downloadStatus {
+      queue {
+        manga {
+          title
+        }
+        chapter {
+          chapterNumber
+        }
+      }
+      state
+    }
+  }
+}
