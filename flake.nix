@@ -37,6 +37,8 @@
 
             buildInputs = [
               ffmpeg
+              fontconfig
+              freetype
               openssl
               yt-dlp
             ];

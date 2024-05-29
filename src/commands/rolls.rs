@@ -1,6 +1,7 @@
 //! Commands used to roll dices and shows the statistics coming from them
 
 use alloc::sync::Arc;
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -13,9 +14,16 @@ use csv::{Reader, Writer};
 use derive_more::{Deref, DerefMut};
 use log::error;
 use once_cell::sync::{Lazy, OnceCell};
+use plotters::backend::BitMapBackend;
+use plotters::chart::ChartBuilder;
+use plotters::coord::ranged1d::IntoSegmentedCoord;
+use plotters::drawing::IntoDrawingArea;
+use plotters::series::Histogram;
+use plotters::style::{Color, IntoFont, BLUE, WHITE};
 use poise::command;
-use poise::serenity_prelude::{Timestamp, UserId};
+use poise::serenity_prelude::{CreateAttachment, CreateMessage, Timestamp, UserId};
 use rand::{thread_rng, Rng};
+use tempfile::NamedTempFile;
 
 use crate::{Context, DATA_DIR};
 
@@ -51,6 +59,26 @@ struct Roll {
     /// Timestamp of the roll
     #[allow(unused)]
     timestamp: Timestamp,
+}
+
+impl PartialEq for Roll {
+    fn eq(&self, other: &Self) -> bool {
+        self.user_id == other.user_id && self.result == other.result && self.sides == other.sides
+    }
+}
+
+impl Eq for Roll {}
+
+impl PartialOrd for Roll {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.result.partial_cmp(&other.result)
+    }
+}
+
+impl Ord for Roll {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
 }
 
 impl Roll {
@@ -250,6 +278,57 @@ pub async fn session(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
+fn draw_boxplot(rolls: &Rolls, title: &str, nb_faces: Option<u32>) -> Result<NamedTempFile> {
+    const WIDTH: u32 = 640;
+    const LENGTH: u32 = 480;
+
+    let file = tempfile::Builder::new().suffix(".png").tempfile()?;
+
+    {
+        let root = BitMapBackend::new(file.path(), (WIDTH, LENGTH)).into_drawing_area();
+        root.fill(&WHITE)?;
+
+        let mut chart_builder = ChartBuilder::on(&root);
+        chart_builder.margin(5).set_left_and_bottom_label_area_size(20);
+
+        let mut datas = HashMap::new();
+        for roll in &rolls.0 {
+            *datas
+                .entry(if nb_faces.is_some() {
+                    (roll.result / (roll.sides / 10)) * (roll.sides / 10) + (roll.sides / 20)
+                } else {
+                    5 + (((roll.result * 100) as f32 / roll.sides as f32 / 10_f32) as u32) * 10
+                })
+                .or_insert(0) += 1;
+        }
+
+        let mut chart_context = chart_builder
+            .caption(title, ("sans-serif", 25).into_font())
+            .build_cartesian_2d(
+                (0_u32..(match nb_faces {
+                    None => 100_u32,
+                    Some(face) => face,
+                }))
+                    .into_segmented(),
+                0_u32..*datas.values().max().ok_or(anyhow!("Cannot create a graph from an empty set of rolls"))?,
+            )
+            .unwrap();
+        chart_context.configure_mesh().draw().unwrap();
+        chart_context
+            .draw_series(
+                Histogram::vertical(&chart_context)
+                    .style(BLUE.filled())
+                    .margin(20)
+                    .data(datas.into_iter()),
+            )
+            .unwrap();
+
+        root.present()?;
+    }
+
+    Ok(file)
+}
+
 /// Affiche des statistiques relatives aux jets de dés
 ///
 /// Exemples :
@@ -365,6 +444,25 @@ pub async fn stats(ctx: Context<'_>, args: Vec<String>) -> Result<()> {
             .await?
         },
     };
+
+    let named_file = draw_boxplot(
+        &rolls,
+        &format!(
+            "jets de {} {}",
+            match user_id_opt {
+                None => "tout le monde".to_owned(),
+                Some(user_id) => user_id.to_user(ctx.http()).await?.name,
+            },
+            match faces_per_dice_opt {
+                None => "normalisés".to_owned(),
+                Some(faces) => format!("sur des d{}", faces),
+            },
+        ),
+        faces_per_dice_opt,
+    )?;
+    ctx.channel_id()
+        .send_files(ctx.http(), [CreateAttachment::path(named_file.path()).await?], CreateMessage::new().content(""))
+        .await?;
 
     Ok(())
 }
