@@ -16,6 +16,7 @@ use poise::serenity_prelude::{CacheHttp, ClientBuilder, FullEvent, GatewayIntent
 use poise::{builtins, command, Framework, FrameworkContext, FrameworkOptions, PrefixFrameworkOptions};
 use songbird::Songbird;
 
+use crate::commands::cards::draw;
 use crate::commands::music::{ensure, pause, play, resume, skip, stop};
 use crate::commands::rolls::{init_csv, roll, session, stats};
 
@@ -42,7 +43,7 @@ async fn event_handler(
     match event {
         FullEvent::Message { new_message } => {
             if new_message.author.id != ctx.http().get_current_user().await.unwrap().id {
-                mangas::detection(ctx, &new_message, data).await
+                mangas::detection(ctx, new_message, data).await
             } else {
                 Ok(())
             }
@@ -99,6 +100,7 @@ async fn main() -> Result<()> {
                 roll(),
                 session(),
                 stats(),
+                draw(),
                 play(),
                 ensure(),
                 pause(),

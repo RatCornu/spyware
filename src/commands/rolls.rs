@@ -71,7 +71,7 @@ impl Eq for Roll {}
 
 impl PartialOrd for Roll {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.result.partial_cmp(&other.result)
+        Some(self.result.cmp(&other.result))
     }
 }
 
@@ -305,22 +305,13 @@ fn draw_boxplot(rolls: &Rolls, title: &str, nb_faces: Option<u32>) -> Result<Nam
         let mut chart_context = chart_builder
             .caption(title, ("sans-serif", 25).into_font())
             .build_cartesian_2d(
-                (0_u32..(match nb_faces {
-                    None => 100_u32,
-                    Some(face) => face,
-                }))
-                    .into_segmented(),
+                (0_u32..nb_faces.unwrap_or(100_u32)).into_segmented(),
                 0_u32..*datas.values().max().ok_or(anyhow!("Cannot create a graph from an empty set of rolls"))?,
             )
             .unwrap();
         chart_context.configure_mesh().draw().unwrap();
         chart_context
-            .draw_series(
-                Histogram::vertical(&chart_context)
-                    .style(BLUE.filled())
-                    .margin(20)
-                    .data(datas.into_iter()),
-            )
+            .draw_series(Histogram::vertical(&chart_context).style(BLUE.filled()).margin(20).data(datas))
             .unwrap();
 
         root.present()?;
