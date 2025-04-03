@@ -3,7 +3,7 @@
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use once_cell::sync::Lazy;
 use poise::command;
 use url::Url;
@@ -55,8 +55,8 @@ fn find_audio_file(id: String, output_folder: &PathBuf) -> Result<(PathBuf, Stri
 
 /// Joue une musique depuis youtube.
 ///
-/// Joue une musique depuis une URL youtube dans le channel audio de la personne ayant lancé la commande, ou l'ajoute à la liste de
-/// lectyre si une musique est déja en cours de lecture.
+/// Joue une musique depuis une URL youtube dans le channel audio de la personne ayant lancé la commande, ou l'ajoute à
+/// la liste de lectyre si une musique est déja en cours de lecture.
 ///
 /// Si un alias a été donné à la musique, l'alias peut remplacer l'URL.
 ///
@@ -197,8 +197,8 @@ pub async fn stop(ctx: Context<'_>) -> Result<()> {
 ///
 /// S'assure qu'une musique est téléchargée pour pouvoir la jouer instantanément par la suite.
 ///
-/// Permet également de donner un alias à la musique pour pouvoir l'écrire à la place de l'URL dans l'invocation de la commande
-/// `/play`.
+/// Permet également de donner un alias à la musique pour pouvoir l'écrire à la place de l'URL dans l'invocation de la
+/// commande `/play`.
 ///
 /// Exemples :
 /// * `/ensure https://www.youtube.com/watch?v=U2jF1KZNxME`

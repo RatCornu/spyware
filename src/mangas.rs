@@ -3,7 +3,7 @@
 use std::collections::hash_map::Entry;
 use std::env;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use graphql_client::{GraphQLQuery, Response};
 use log::info;
 use once_cell::sync::Lazy;
@@ -23,8 +23,7 @@ const SPYWARE_CATEGORY_ID: i64 = 2;
 
 const MANGA_EMOJI: &str = "📖";
 
-const MANGADEX_REGEX: &str =
-    r"https:\/\/mangadex\.org\/title\/([0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12})\/(.*)";
+const MANGADEX_REGEX: &str = r"https:\/\/mangadex\.org\/title\/([0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12})\/(.*)";
 
 const MANGADEX_SOURCE_ID: &str = "2499283573021220255";
 
@@ -130,7 +129,8 @@ impl MangaSource {
                 category_id: SPYWARE_CATEGORY_ID,
             });
             let set_category_res = client.post(&*SUWAYOMI_SERVER_URL).json(&set_category_request_body).send().await?;
-            let set_category_response_body: Response<set_manga_category::ResponseData> = set_category_res.json().await?;
+            let set_category_response_body: Response<set_manga_category::ResponseData> =
+                set_category_res.json().await?;
             let set_category_response_data: set_manga_category::ResponseData =
                 set_category_response_body.data.ok_or(anyhow!("Could not set this manga category"))?;
             info!(
@@ -149,7 +149,8 @@ impl MangaSource {
 
         let fetch_chapters_request_body = FetchMangaChapters::build_query(fetch_manga_chapters::Variables { manga_id });
         let fetch_chapters_res = client.post(&*SUWAYOMI_SERVER_URL).json(&fetch_chapters_request_body).send().await?;
-        let fetch_chapters_response_body: Response<fetch_manga_chapters::ResponseData> = fetch_chapters_res.json().await?;
+        let fetch_chapters_response_body: Response<fetch_manga_chapters::ResponseData> =
+            fetch_chapters_res.json().await?;
         let fetch_chapters_response_data: fetch_manga_chapters::ResponseData =
             fetch_chapters_response_body.data.ok_or(anyhow!("Could not fetch this manga chapters"))?;
 
@@ -163,7 +164,8 @@ impl MangaSource {
         let dl_chapters_request_body =
             AddChaptersToDownloadQueue::build_query(add_chapters_to_download_queue::Variables { chapters });
         let dl_chapters_res = client.post(&*SUWAYOMI_SERVER_URL).json(&dl_chapters_request_body).send().await?;
-        let dl_chapters_response_body: Response<add_chapters_to_download_queue::ResponseData> = dl_chapters_res.json().await?;
+        let dl_chapters_response_body: Response<add_chapters_to_download_queue::ResponseData> =
+            dl_chapters_res.json().await?;
         let dl_chapters_response_data: add_chapters_to_download_queue::ResponseData = dl_chapters_response_body
             .data
             .ok_or(anyhow!("Could not add this manga to download queue"))?;

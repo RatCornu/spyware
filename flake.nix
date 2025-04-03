@@ -1,62 +1,69 @@
 {
   inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    nixpkgs.url = "nixpkgs/nixos-unstable";
-
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
-      inputs = {
-        flake-utils.follows = "flake-utils";
-        nixpkgs.follows = "nixpkgs";
-      };
+      inputs.nixpkgs.follows = "nixpkgs";
     };
+    crane.url = "github:ipetkov/crane";
   };
 
-  outputs = { self, flake-utils, rust-overlay, nixpkgs }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      flake-utils,
+      rust-overlay,
+      nixpkgs,
+      crane,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
-        overlays = [ (import rust-overlay) ];
+        overlays = [ rust-overlay.overlays.default ];
         pkgs = import nixpkgs { inherit overlays system; };
         rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-      in
-      with pkgs; {
-        packages = {
-          spyware = pkgs.rustPlatform.buildRustPackage {
-            pname = "spyware";
-            version = "0.1.0";
+        craneLib = (crane.mkLib nixpkgs.legacyPackages.${system}).overrideToolchain rust;
 
-            nativeBuildInputs = [
-              rust
-              gcc
-              cmake
-              gnumake
-              libopus
-              pkg-config
-              makeWrapper
-            ];
+        commonArgs = {
+          src = pkgs.lib.cleanSourceWith { src = ./.; };
 
-            buildInputs = [
-              ffmpeg
-              fontconfig
-              freetype
-              openssl
-              yt-dlp
-            ];
+          nativeBuildInputs = with pkgs; [
+            rust
+            gcc
+            cmake
+            gnumake
+            libopus
+            pkg-config
+            makeWrapper
+          ];
 
-            postFixup = ''
-              wrapProgram $out/bin/spyware --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.yt-dlp pkgs.ffmpeg pkgs.openssl ]}
-            '';
-
-            src = ./.;
-            cargoLock.lockFile = ./Cargo.lock;
-
-            meta = with pkgs.lib; {
-              description = "Bot discord pour la Foire aux Monstres";
-              homepage = "https://github.com/RatCornu/spyware";
-              license = licenses.gpl3;
-            };
-          };
+          buildInputs = with pkgs; [
+            ffmpeg
+            fontconfig
+            freetype
+            openssl
+            yt-dlp
+          ];
         };
-        defaultPackage = self.packages.${system}.spyware;
-      });
+
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+      in
+      rec {
+        packages = rec {
+          spyware = craneLib.buildPackage (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+            }
+          );
+
+          default = spyware;
+        };
+
+        devShells.default = craneLib.devShell {
+          packages = with pkgs; [ git ] ++ packages.spyware.buildInputs ++ packages.spyware.nativeBuildInputs;
+        };
+      }
+    );
 }

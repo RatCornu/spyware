@@ -2,10 +2,10 @@
 
 use std::fmt::Display;
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::{Error, Result, anyhow};
 use poise::command;
 use rand::distributions::{Distribution, Standard};
-use rand::{random, Rng};
+use rand::{Rng, random};
 
 use crate::Context;
 
@@ -180,7 +180,9 @@ enum Card {
 impl Distribution<Card> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Card {
         match rng.gen_range(1_u32..=54) {
-            i @ 1..=52 => Card::Normal(Value::try_from((i - 1) % 13 + 1).unwrap(), Suit::try_from((i - 1) / 13).unwrap()),
+            i @ 1..=52 => {
+                Card::Normal(Value::try_from((i - 1) % 13 + 1).unwrap(), Suit::try_from((i - 1) / 13).unwrap())
+            },
             53..=54 => Card::Joker,
             _ => unreachable!(),
         }

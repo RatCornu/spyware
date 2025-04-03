@@ -7,16 +7,17 @@ use std::env;
 use std::sync::Arc;
 
 use anyhow::{Error, Result};
-use commands::misc::{ping, uptime, STARTING_TIME};
-use log::{error, warn, Level};
+use commands::custom::cthulhu_dark::rcd;
+use log::{Level, error, warn};
 use mangas::MangaSource;
 use once_cell::sync::Lazy;
 use poise::serenity_prelude::futures::lock::Mutex;
 use poise::serenity_prelude::{CacheHttp, ClientBuilder, FullEvent, GatewayIntents, Http, MessageId};
-use poise::{builtins, command, Framework, FrameworkContext, FrameworkOptions, PrefixFrameworkOptions};
+use poise::{Framework, FrameworkContext, FrameworkOptions, PrefixFrameworkOptions, builtins, command};
 use songbird::Songbird;
 
 use crate::commands::cards::draw;
+use crate::commands::misc::{STARTING_TIME, download, ping, uptime};
 use crate::commands::music::{ensure, pause, play, resume, skip, stop};
 use crate::commands::rolls::{init_csv, roll, session, stats};
 
@@ -25,7 +26,8 @@ extern crate alloc;
 mod commands;
 mod mangas;
 
-static DATA_DIR: Lazy<String> = Lazy::new(|| std::env::args().nth(1).expect("Must provide the data directory as argument"));
+static DATA_DIR: Lazy<String> =
+    Lazy::new(|| std::env::args().nth(1).expect("Must provide the data directory as argument"));
 
 struct Data {
     songbird: Arc<Songbird>,
@@ -97,6 +99,7 @@ async fn main() -> Result<()> {
                 help(),
                 ping(),
                 uptime(),
+                download(),
                 roll(),
                 session(),
                 stats(),
@@ -107,6 +110,7 @@ async fn main() -> Result<()> {
                 resume(),
                 skip(),
                 stop(),
+                rcd(),
             ],
             event_handler: |ctx, event, framework, data| Box::pin(event_handler(ctx, event, framework, data)),
             ..Default::default()

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Mutex;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use csv::{Reader, Writer};
 use derive_more::{Deref, DerefMut};
@@ -19,10 +19,10 @@ use plotters::chart::ChartBuilder;
 use plotters::coord::ranged1d::IntoSegmentedCoord;
 use plotters::drawing::IntoDrawingArea;
 use plotters::series::Histogram;
-use plotters::style::{Color, IntoFont, BLUE, WHITE};
+use plotters::style::{BLUE, Color, IntoFont, WHITE};
 use poise::command;
 use poise::serenity_prelude::{CreateAttachment, CreateMessage, Timestamp, UserId};
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use tempfile::NamedTempFile;
 
 use crate::{Context, DATA_DIR};
