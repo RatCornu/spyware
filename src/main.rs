@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
                 help(),
                 ping(),
                 uptime(),
-                download(),
+                // download(),
                 roll(),
                 session(),
                 stats(),
