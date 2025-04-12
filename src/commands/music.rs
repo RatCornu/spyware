@@ -4,6 +4,7 @@ use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
+use log::warn;
 use once_cell::sync::Lazy;
 use poise::command;
 use url::Url;
@@ -47,6 +48,7 @@ fn find_audio_file(id: String, output_folder: &PathBuf) -> Result<(PathBuf, Stri
 
     let output_file_path = output_folder.join(Into::<String>::into(audio_id.clone()) + "." + MUSIC_FILE_EXTENSION);
     if !output_file_path.exists() {
+        warn!("Downloading the audio {id} to {output_file_path:?}");
         video.download_to(output_folder)?;
     };
 
@@ -80,6 +82,7 @@ pub async fn play(ctx: Context<'_>, url: String) -> Result<()> {
     handler.lock().await.deafen(true).await?;
 
     let (path, audio_id, _is_alias) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
+    warn!("Starts playing the audio {path:?}");
     let input = songbird::input::File::new(path).into();
 
     let mut borrow = handler.lock().await;
@@ -207,6 +210,7 @@ pub async fn stop(ctx: Context<'_>) -> Result<()> {
 pub async fn ensure(ctx: Context<'_>, url: String, alias_opt: Option<String>) -> Result<()> {
     if let Some(alias) = alias_opt {
         let (file_path, audio_id, _) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
+        warn!("Ensuring the audio {file_path:?}");
         let mut symlink_path = file_path.clone().parent().unwrap_or_else(|| unreachable!()).to_path_buf();
         symlink_path.push(format!("{alias}.{MUSIC_FILE_EXTENSION}"));
         symlink(file_path, symlink_path)?;
@@ -216,7 +220,8 @@ pub async fn ensure(ctx: Context<'_>, url: String, alias_opt: Option<String>) ->
         ))
         .await?;
     } else {
-        let (_, audio_id, _) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
+        let (path, audio_id, _) = find_audio_file(url, &MUSIC_CACHE_DIR)?;
+        warn!("Ensuring the audio {path:?}");
         ctx.say(format!("La musique https://youtube.com/watch?v={} est bien disponible.", audio_id))
             .await?;
     }

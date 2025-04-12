@@ -25,4 +25,4 @@ tempfile = "3"
 tokio = { version = "1", features = ["macros", "signal", "rt-multi-thread", "time"] }
 url = "2"
 uuid = { version = "1", features = ["v4", "fast-rng", "macro-diagnostics"] }
-youtube_dl = "0.9"
+youtube_dl = "0.10"
