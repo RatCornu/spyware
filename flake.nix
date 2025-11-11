@@ -34,6 +34,7 @@
             cmake
             gnumake
             libopus
+            fontconfig
             pkg-config
             makeWrapper
           ];
