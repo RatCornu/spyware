@@ -1,0 +1,17 @@
+WHITESPACE = _{ " " }
+
+integer = @{ ASCII_DIGIT+ }
+dice = @{ integer ~ "d" ~ integer }
+
+unary_minus = { "-" }
+primary = _{ dice | integer | "(" ~ expr ~ ")" }
+atom = _{ unary_minus? ~ primary }
+
+bin_op = _{ add | subtract | multiply | divide | modulo }
+add = { "+" }
+subtract = { "-" }
+multiply = { "*" }
+divide = { "/" }
+modulo = { "%" }
+
+expr = { atom ~ (bin_op ~ atom)* }

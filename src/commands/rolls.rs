@@ -1,19 +1,21 @@
 //! Commands used to roll dices and shows the statistics coming from them
 
-use alloc::sync::Arc;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{Result, anyhow};
+use async_recursion::async_recursion;
 use chrono::Utc;
 use csv::{Reader, Writer};
 use derive_more::{Deref, DerefMut};
 use log::error;
-use once_cell::sync::{Lazy, OnceCell};
+use pest::Parser;
+use pest::iterators::Pairs;
+use pest::pratt_parser::PrattParser;
 use plotters::backend::BitMapBackend;
 use plotters::chart::ChartBuilder;
 use plotters::coord::ranged1d::IntoSegmentedCoord;
@@ -21,9 +23,11 @@ use plotters::drawing::IntoDrawingArea;
 use plotters::series::Histogram;
 use plotters::style::{BLUE, Color, IntoFont, WHITE};
 use poise::command;
+use poise::serenity_prelude::futures::lock::Mutex;
 use poise::serenity_prelude::{CreateAttachment, CreateMessage, Timestamp, UserId};
 use rand::{Rng, thread_rng};
 use tempfile::NamedTempFile;
+use tokio::sync::OnceCell;
 
 use crate::{Context, DATA_DIR};
 
@@ -31,7 +35,7 @@ use crate::{Context, DATA_DIR};
 const NICE: [char; 4] = ['🇳', '🇮', '🇨', '🇪'];
 
 /// Directory used to store roll linked files
-static ROLL_DIR: Lazy<PathBuf> = Lazy::new(|| {
+static ROLL_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
     let mut data_dir = PathBuf::new();
     data_dir.push(&*DATA_DIR);
     data_dir.push("rolls");
@@ -39,10 +43,10 @@ static ROLL_DIR: Lazy<PathBuf> = Lazy::new(|| {
 });
 
 /// Name of the file containing the current session
-pub static CURRENT_ROLL_SESSION: Mutex<String> = Mutex::new(String::new());
+pub static CURRENT_ROLL_SESSION: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new(String::new()));
 
 /// Common writer for the current session
-pub static CURRENT_ROLL_SESSION_WRITER: OnceCell<Arc<Mutex<Writer<File>>>> = OnceCell::new();
+pub static CURRENT_ROLL_SESSION_WRITER: LazyLock<OnceCell<Arc<Mutex<Writer<File>>>>> = LazyLock::new(OnceCell::new);
 
 /// Representation of a dice, used for the integration with `serde`
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
@@ -130,16 +134,129 @@ impl Rolls {
     }
 }
 
+/// Derivation of the pest grammar.
+#[derive(pest_derive::Parser)]
+#[grammar = "./src/commands/rolls.pest"]
+pub struct Calculator;
+
+pub enum UnaryOperator {
+    Minus,
+}
+
+pub enum BinaryOperator {
+    Add,
+    Substract,
+    Multiply,
+    Divide,
+    Modulo,
+}
+
+/// Expressions available during a roll.
+pub enum Expr {
+    Dices {
+        nb_dices: u32,
+        nb_faces: u32,
+    },
+    Integer(u32),
+    UnOp {
+        op: UnaryOperator,
+        exp: Box<Expr>,
+    },
+    BinOp {
+        lhs: Box<Expr>,
+        op: BinaryOperator,
+        rhs: Box<Expr>,
+    },
+}
+
+impl Expr {
+    #[async_recursion]
+    pub async fn eval(&self, ctx: &Context<'_>) -> Result<i64> {
+        match self {
+            Expr::Dices { nb_dices, nb_faces } => {
+                let mut rolls = Vec::new();
+                for _ in 0..*nb_dices {
+                    rolls.push(roll_dice(ctx, *nb_faces).await?);
+                }
+                Ok(rolls.iter().fold(0, |acc, res| acc + i64::from(*res)))
+            },
+            Expr::Integer(int) => Ok(i64::from(*int)),
+            Expr::UnOp { op, exp } => match op {
+                UnaryOperator::Minus => exp.eval(ctx).await.map(|res| -res),
+            },
+            Expr::BinOp { lhs, op, rhs } => match op {
+                BinaryOperator::Add => Ok(lhs.eval(ctx).await? + rhs.eval(ctx).await?),
+                BinaryOperator::Substract => Ok(lhs.eval(ctx).await? - rhs.eval(ctx).await?),
+                BinaryOperator::Multiply => Ok(lhs.eval(ctx).await? * rhs.eval(ctx).await?),
+                BinaryOperator::Divide => Ok(lhs.eval(ctx).await? / rhs.eval(ctx).await?),
+                BinaryOperator::Modulo => Ok(lhs.eval(ctx).await? % rhs.eval(ctx).await?),
+            },
+        }
+    }
+}
+
+static PRATT_PARSER: LazyLock<PrattParser<Rule>> = std::sync::LazyLock::new(|| {
+    use pest::pratt_parser::Assoc::Left;
+    use pest::pratt_parser::Op;
+
+    PrattParser::new()
+        .op(Op::infix(Rule::add, Left) | Op::infix(Rule::subtract, Left))
+        .op(Op::infix(Rule::multiply, Left) | Op::infix(Rule::divide, Left) | Op::infix(Rule::modulo, Left))
+        .op(Op::prefix(Rule::unary_minus))
+});
+
+pub fn parse_expr(pairs: Pairs<'_, Rule>) -> Result<Expr> {
+    PRATT_PARSER
+        .map_primary(|primary| try {
+            match primary.as_rule() {
+                Rule::integer => Expr::Integer(primary.as_str().parse::<u32>()?),
+                Rule::dice => {
+                    let mut dice_roll = primary.as_str().split('d');
+                    let nb_dices =
+                        dice_roll.next().ok_or(anyhow!("Could not parse roll dice"))?.parse::<u32>().unwrap();
+                    let nb_faces =
+                        dice_roll.next().ok_or(anyhow!("Could not parse roll dice"))?.parse::<u32>().unwrap();
+
+                    Expr::Dices { nb_dices, nb_faces }
+                },
+                Rule::expr => parse_expr(primary.into_inner())?,
+                rule => return Err(anyhow!("Entrée invalide: {rule:?}")),
+            }
+        })
+        .map_prefix(|op, rhs| try {
+            match op.as_rule() {
+                Rule::unary_minus => Expr::UnOp {
+                    op: UnaryOperator::Minus,
+                    exp: Box::new(rhs?),
+                },
+                rule => return Err(anyhow!("Entrée invalide: {rule:?}")),
+            }
+        })
+        .map_infix(|lhs, op, rhs| try {
+            let op = match op.as_rule() {
+                Rule::add => BinaryOperator::Add,
+                Rule::subtract => BinaryOperator::Substract,
+                Rule::multiply => BinaryOperator::Multiply,
+                Rule::divide => BinaryOperator::Divide,
+                Rule::modulo => BinaryOperator::Modulo,
+                rule => return Err(anyhow!("Expr::parse expected infix operation, found {rule:?}")),
+            };
+
+            Expr::BinOp {
+                lhs: Box::new(lhs?),
+                op,
+                rhs: Box::new(rhs?),
+            }
+        })
+        .parse(pairs)
+}
+
 /// Updates the content of [`CURRENT_ROLL_SESSION`] and [`CURRENT_ROLL_SESSION_WRITER`] to match path given
-fn update_session(new_file: &str) -> Result<()> {
-    CURRENT_ROLL_SESSION
-        .lock()
-        .as_mut()
-        .expect("Could not lock `CURRENT_ROLL_SESSION`")
-        .clone_from(&new_file.to_owned());
+async fn update_session(new_file: &str) -> Result<()> {
+    CURRENT_ROLL_SESSION.lock().await.clone_from(&new_file.to_owned());
 
     let new_file_path = Path::join(&ROLL_DIR, new_file);
-    let current_roll_session_writer = CURRENT_ROLL_SESSION_WRITER.get_or_init(move || {
+    let current_roll_session_writer = CURRENT_ROLL_SESSION_WRITER.get_or_init(async move || {
         Arc::new(Mutex::new(Writer::from_writer(
             File::options()
                 .append(true)
@@ -150,7 +267,7 @@ fn update_session(new_file: &str) -> Result<()> {
     });
 
     let new_file_path = Path::join(&ROLL_DIR, new_file);
-    let mut binder = current_roll_session_writer.lock().expect("Could not lock `CURRENT_ROLL_SESSION_WRITER`");
+    let mut binder = current_roll_session_writer.await.lock().await;
     binder.flush()?;
     *binder = Writer::from_writer(File::options().append(true).create(true).open(new_file_path)?);
     drop(binder);
@@ -160,16 +277,16 @@ fn update_session(new_file: &str) -> Result<()> {
 
 /// Create a new session file, appends its name in the `<DATA_DIR>/rolls/sessions.txt` file, and updates
 /// [`CURRENT_ROLL_SESSION_WRITER`]
-fn new_session() -> Result<()> {
+async fn new_session() -> Result<()> {
     let session_file_path = Path::join(&ROLL_DIR, "sessions.txt");
     let mut session_file = File::options().read(true).append(true).create(true).open(session_file_path)?;
     let new_file = Utc::now().format("%Y-%m-%d_%H-%M-%S.csv").to_string();
     session_file.write_all((new_file.clone() + "\n").as_bytes())?;
-    update_session(&new_file)?;
+    update_session(&new_file).await?;
 
     // SAFETY: at this point, `CURRENT_ROLL_SESSION_WRITER` is initialized
     let current_roll_session_writer = unsafe { CURRENT_ROLL_SESSION_WRITER.get().unwrap_unchecked() };
-    let mut binder = current_roll_session_writer.lock().expect("Could not lock `CURRENT_ROLL_SESSION_WRITER`");
+    let mut binder = current_roll_session_writer.lock().await;
     binder.write_record(["user_id", "result", "sides", "timestamp"])?;
     binder.flush()?;
     drop(binder);
@@ -191,18 +308,34 @@ fn load_session(file: &str) -> Result<Vec<Roll>> {
 
 /// Initializes the roll saving system in CSV files
 #[allow(clippy::verbose_file_reads)]
-pub fn init_csv() -> Result<()> {
+pub async fn init_csv() -> Result<()> {
     let session_file_path = Path::join(&ROLL_DIR, "sessions.txt");
     let mut session_file = File::options().read(true).append(true).create(true).open(session_file_path)?;
     let mut content = String::new();
     session_file.read_to_string(&mut content)?;
 
     match content.lines().last() {
-        None => new_session()?,
-        Some(session) => update_session(session)?,
+        None => new_session().await?,
+        Some(session) => update_session(session).await?,
     };
 
     Ok(())
+}
+
+async fn roll_dice(ctx: &Context<'_>, nb_faces: u32) -> Result<u32> {
+    let result = thread_rng().gen_range(1..=nb_faces);
+    let mut current_roll_session_writer =
+                    // SAFETY: at this point, `CURRENT_ROLL_SESSION_WRITER` is initialized
+                    unsafe { CURRENT_ROLL_SESSION_WRITER.get().unwrap_unchecked() }.lock().await;
+    current_roll_session_writer
+        .write_record([
+            ctx.author().id.to_string(),
+            result.to_string(),
+            nb_faces.to_string(),
+            ctx.created_at().to_string(),
+        ])
+        .expect("Could not write a record in the current session");
+    Ok(result)
 }
 
 /// Jette des dés
@@ -210,70 +343,52 @@ pub fn init_csv() -> Result<()> {
 /// Exemples :
 /// * `/r 1d100`
 /// * `/r 5d6`
+/// * `/r 1d3 + (3d4 * 2d20)`
 #[command(prefix_command, aliases("r"), category = "Dés")]
-pub async fn roll(ctx: Context<'_>, rolls: String) -> Result<()> {
-    let parsed_rolls = rolls.split('d').collect::<Vec<_>>();
+pub async fn roll(ctx: Context<'_>, #[rest] expr: String) -> Result<()> {
+    if expr.split(' ').count() == 1 {
+        let mut dice_roll = expr.split('d');
+        let nb_dices = dice_roll.next().ok_or(anyhow!("Could not parse roll dice"))?.parse::<u32>().unwrap();
+        let nb_faces = dice_roll.next().ok_or(anyhow!("Could not parse roll dice"))?.parse::<u32>().unwrap();
 
-    if parsed_rolls.len() != 2 {
-        return Err(anyhow!("Mauvaise utilisation : `<Nombre de dés>d<Nombre de faces par dé>`"));
-    }
-
-    let nb_dices = parsed_rolls.first().unwrap().parse::<u32>()?;
-    let nb_faces = parsed_rolls.get(1).unwrap().parse::<u32>()?;
-
-    let mut results = Vec::<u32>::new();
-    for _ in 0..nb_dices {
-        results.push(thread_rng().gen_range(1..=nb_faces));
-    }
-
-    if nb_dices == 0 {
-        error!("Tried to roll 0 dice");
-    } else {
+        let mut results = Vec::new();
+        for _ in 0..nb_dices {
+            results.push(roll_dice(&ctx, nb_faces).await?);
+        }
         let mut iter_results = results.iter();
         // SAFETY: it is checked that `results` contains at least one element
         let first_result = unsafe { iter_results.next().unwrap_unchecked() };
-        match ctx
-            .say(format!(
+        let sent_message = ctx
+            .reply(format!(
                 "{}\n> {}",
                 ctx.author().name,
                 iter_results.fold(first_result.to_string(), |acc, res| acc + " / " + &res.to_string())
             ))
-            .await
-        {
-            Ok(sent_message) if nb_dices == 1 && first_result == &69 => {
-                for emoji in NICE {
-                    sent_message.message().await?.react(ctx.http(), emoji).await?;
-                }
-            },
-            Ok(_) => {
-                let mut current_roll_session_writer =
-                    // SAFETY: at this point, `CURRENT_ROLL_SESSION_WRITER` is initialized
-                    unsafe { CURRENT_ROLL_SESSION_WRITER.get().unwrap_unchecked() }.lock().expect("Could not lock `CURRENT_ROLL_SESSION_WRITER`");
-                for result in &results {
-                    current_roll_session_writer
-                        .write_record([
-                            ctx.author().id.to_string(),
-                            result.to_string(),
-                            nb_faces.to_string(),
-                            ctx.created_at().to_string(),
-                        ])
-                        .expect("Could not write a record in the current session");
-                }
-            },
-            Err(_) => {
-                error!("Tried to roll {}d{} which is too large for one message", nb_dices, nb_faces);
-                return Err(anyhow!("Le nombre de dés jetés est trop grand !"));
-            },
+            .await?;
+
+        if nb_dices == 1 && first_result == &69 {
+            for emoji in NICE {
+                sent_message.message().await?.react(ctx.http(), emoji).await?;
+            }
         }
+
+        return Ok(());
     }
 
+    let exp = match Calculator::parse(Rule::expr, &expr) {
+        Ok(pair) => parse_expr(pair)?,
+        Err(err) => return Err(anyhow!("Erreur dans le parsing: {err}")),
+    };
+
+    let value = exp.eval(&ctx).await?;
+    ctx.reply(format!("{}\n> {}", ctx.author().name, value)).await?;
     Ok(())
 }
 
 /// Crée une nouvelle session de jeu.
 #[command(prefix_command, category = "Dés")]
 pub async fn session(ctx: Context<'_>) -> Result<()> {
-    new_session()?;
+    new_session().await?;
     ctx.say("Une nouvelle session vient de débuter !").await?;
     Ok(())
 }
@@ -330,11 +445,7 @@ fn draw_boxplot(rolls: &Rolls, title: &str, nb_faces: Option<u32>) -> Result<Nam
 #[command(prefix_command, category = "Dés")]
 pub async fn stats(ctx: Context<'_>, args: Vec<String>) -> Result<()> {
     // SAFETY: at this point, `CURRENT_ROLL_SESSION_WRITER` is set
-    unsafe { CURRENT_ROLL_SESSION_WRITER.get_unchecked() }
-        .lock()
-        .as_mut()
-        .expect("Could not lock `CURRENT_ROLL_SESSION_WRITER`")
-        .flush()?;
+    unsafe { CURRENT_ROLL_SESSION_WRITER.get().unwrap_unchecked() }.lock().await.flush()?;
 
     let mut is_all_rolls = false;
     let mut faces_per_dice_opt: Option<u32> = None;
@@ -376,7 +487,7 @@ pub async fn stats(ctx: Context<'_>, args: Vec<String>) -> Result<()> {
         sessions.pop();
         sessions
     } else {
-        let binding = CURRENT_ROLL_SESSION.lock().expect("Could not lock `CURRENT_ROLL_SESSION`");
+        let binding = CURRENT_ROLL_SESSION.lock().await;
         vec![<String as AsRef<str>>::as_ref(&binding).to_owned()]
     };
 

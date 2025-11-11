@@ -1,6 +1,6 @@
 //! `Spyware`
 
-#![feature(let_chains)]
+#![feature(try_blocks)]
 
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -17,11 +17,9 @@ use poise::{Framework, FrameworkContext, FrameworkOptions, PrefixFrameworkOption
 use songbird::Songbird;
 
 use crate::commands::cards::draw;
-use crate::commands::misc::{STARTING_TIME, download, ping, uptime};
+use crate::commands::misc::{STARTING_TIME, ping, uptime};
 use crate::commands::music::{ensure, pause, play, resume, skip, stop};
 use crate::commands::rolls::{init_csv, roll, session, stats};
-
-extern crate alloc;
 
 mod commands;
 mod mangas;
@@ -133,7 +131,7 @@ async fn main() -> Result<()> {
         .voice_manager_arc(songbird)
         .await?;
 
-    init_csv()?;
+    init_csv().await?;
 
     warn!("{} a démaré à : {}.", bot_name, *STARTING_TIME);
     if let Err(err) = client.start().await {
