@@ -1,8 +1,10 @@
 //! Commands used to roll dices and shows the statistics coming from them
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::fs::{self, File};
 use std::io::{Read, Write};
+use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
@@ -151,45 +153,111 @@ pub enum BinaryOperator {
     Modulo,
 }
 
+pub struct Dices {
+    nb_dices: u32,
+    nb_faces: u32,
+}
+
 /// Expressions available during a roll.
-pub enum Expr {
-    Dices {
-        nb_dices: u32,
-        nb_faces: u32,
-    },
+pub enum Expr<T> {
+    Dices(T),
     Integer(u32),
     UnOp {
         op: UnaryOperator,
-        exp: Box<Expr>,
+        exp: Box<Expr<T>>,
     },
     BinOp {
-        lhs: Box<Expr>,
+        lhs: Box<Expr<T>>,
         op: BinaryOperator,
-        rhs: Box<Expr>,
+        rhs: Box<Expr<T>>,
     },
 }
 
-impl Expr {
-    #[async_recursion]
-    pub async fn eval(&self, ctx: &Context<'_>) -> Result<i64> {
+impl Display for Expr<Vec<u32>> {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expr::Dices { nb_dices, nb_faces } => {
-                let mut rolls = Vec::new();
-                for _ in 0..*nb_dices {
-                    rolls.push(roll_dice(ctx, *nb_faces).await?);
+            Expr::Dices(rolls) => {
+                if let Some(first_roll) = rolls.first() {
+                    let mut acc = first_roll.to_string();
+                    for r in rolls {
+                        acc.push_str(&format!(", {r}"));
+                    }
+                    write!(fmt, "[{}]", acc)
+                } else {
+                    write!(fmt, "[]")
                 }
-                Ok(rolls.iter().fold(0, |acc, res| acc + i64::from(*res)))
             },
-            Expr::Integer(int) => Ok(i64::from(*int)),
+            Expr::Integer(int) => write!(fmt, "{int}"),
+            Expr::UnOp { op, exp } => write!(
+                fmt,
+                "{} {}",
+                match op {
+                    UnaryOperator::Minus => "-",
+                },
+                exp
+            ),
+            Expr::BinOp { lhs, op, rhs } => write!(
+                fmt,
+                "{} {} {}",
+                lhs,
+                match op {
+                    BinaryOperator::Add => "+",
+                    BinaryOperator::Substract => "-",
+                    BinaryOperator::Multiply => "*",
+                    BinaryOperator::Divide => "/",
+                    BinaryOperator::Modulo => "%",
+                },
+                rhs
+            ),
+        }
+    }
+}
+
+impl Expr<Dices> {
+    #[async_recursion]
+    pub async fn eval(self, ctx: &Context<'_>) -> Result<Expr<Vec<u32>>> {
+        match self {
+            Expr::Dices(Dices { nb_dices, nb_faces }) => {
+                let mut rolls = Vec::new();
+                for _ in 0..nb_dices {
+                    rolls.push(roll_dice(ctx, nb_faces).await?);
+                }
+                Ok(Expr::Dices(rolls))
+            },
+            Expr::Integer(int) => Ok(Expr::Integer(int)),
             Expr::UnOp { op, exp } => match op {
-                UnaryOperator::Minus => exp.eval(ctx).await.map(|res| -res),
+                UnaryOperator::Minus => Ok(Expr::UnOp {
+                    op: UnaryOperator::Minus,
+                    exp: Box::new(exp.eval(ctx).await?),
+                }),
             },
-            Expr::BinOp { lhs, op, rhs } => match op {
-                BinaryOperator::Add => Ok(lhs.eval(ctx).await? + rhs.eval(ctx).await?),
-                BinaryOperator::Substract => Ok(lhs.eval(ctx).await? - rhs.eval(ctx).await?),
-                BinaryOperator::Multiply => Ok(lhs.eval(ctx).await? * rhs.eval(ctx).await?),
-                BinaryOperator::Divide => Ok(lhs.eval(ctx).await? / rhs.eval(ctx).await?),
-                BinaryOperator::Modulo => Ok(lhs.eval(ctx).await? % rhs.eval(ctx).await?),
+            Expr::BinOp { lhs, op, rhs } => Ok(Expr::BinOp {
+                lhs: Box::new(lhs.eval(ctx).await?),
+                op,
+                rhs: Box::new(rhs.eval(ctx).await?),
+            }),
+        }
+    }
+}
+
+impl Expr<Vec<u32>> {
+    pub fn value(&self) -> i64 {
+        match self {
+            Expr::Dices(rolls) => i64::from(rolls.iter().sum::<u32>()),
+            Expr::Integer(int) => i64::from(*int),
+            Expr::UnOp { op, exp } => match op {
+                UnaryOperator::Minus => -exp.value(),
+            },
+            Expr::BinOp { lhs, op, rhs } => {
+                let op_fn = match op {
+                    BinaryOperator::Add => <i64 as Add<i64>>::add,
+                    BinaryOperator::Substract => <i64 as Sub<i64>>::sub,
+                    BinaryOperator::Multiply => <i64 as Mul<i64>>::mul,
+                    BinaryOperator::Divide => <i64 as Div<i64>>::div,
+                    BinaryOperator::Modulo => <i64 as Rem<i64>>::rem,
+                };
+
+                op_fn(lhs.value(), rhs.value())
             },
         }
     }
@@ -205,7 +273,7 @@ static PRATT_PARSER: LazyLock<PrattParser<Rule>> = std::sync::LazyLock::new(|| {
         .op(Op::prefix(Rule::unary_minus))
 });
 
-pub fn parse_expr(pairs: Pairs<'_, Rule>) -> Result<Expr> {
+pub fn parse_expr(pairs: Pairs<'_, Rule>) -> Result<Expr<Dices>> {
     PRATT_PARSER
         .map_primary(|primary| try {
             match primary.as_rule() {
@@ -217,7 +285,7 @@ pub fn parse_expr(pairs: Pairs<'_, Rule>) -> Result<Expr> {
                     let nb_faces =
                         dice_roll.next().ok_or(anyhow!("Could not parse roll dice"))?.parse::<u32>().unwrap();
 
-                    Expr::Dices { nb_dices, nb_faces }
+                    Expr::Dices(Dices { nb_dices, nb_faces })
                 },
                 Rule::expr => parse_expr(primary.into_inner())?,
                 rule => return Err(anyhow!("Entrée invalide: {rule:?}")),
@@ -346,43 +414,39 @@ async fn roll_dice(ctx: &Context<'_>, nb_faces: u32) -> Result<u32> {
 /// * `/r 1d3 + (3d4 * 2d20)`
 #[command(prefix_command, aliases("r"), category = "Dés")]
 pub async fn roll(ctx: Context<'_>, #[rest] expr: String) -> Result<()> {
-    if expr.split(' ').count() == 1 {
-        let mut dice_roll = expr.split('d');
-        let nb_dices = dice_roll.next().ok_or(anyhow!("Could not parse roll dice"))?.parse::<u32>().unwrap();
-        let nb_faces = dice_roll.next().ok_or(anyhow!("Could not parse roll dice"))?.parse::<u32>().unwrap();
-
-        let mut results = Vec::new();
-        for _ in 0..nb_dices {
-            results.push(roll_dice(&ctx, nb_faces).await?);
-        }
-        let mut iter_results = results.iter();
-        // SAFETY: it is checked that `results` contains at least one element
-        let first_result = unsafe { iter_results.next().unwrap_unchecked() };
-        let sent_message = ctx
-            .reply(format!(
-                "{}\n> {}",
-                ctx.author().name,
-                iter_results.fold(first_result.to_string(), |acc, res| acc + " / " + &res.to_string())
-            ))
-            .await?;
-
-        if nb_dices == 1 && first_result == &69 {
-            for emoji in NICE {
-                sent_message.message().await?.react(ctx.http(), emoji).await?;
-            }
-        }
-
-        return Ok(());
-    }
-
     let exp = match Calculator::parse(Rule::expr, &expr) {
         Ok(pair) => parse_expr(pair)?,
         Err(err) => return Err(anyhow!("Erreur dans le parsing: {err}")),
     };
 
-    let value = exp.eval(&ctx).await?;
-    ctx.reply(format!("{}\n> {}", ctx.author().name, value)).await?;
-    Ok(())
+    let ast = exp.eval(&ctx).await?;
+
+    match ast {
+        Expr::Dices(rolls) => {
+            let mut iter_results = rolls.iter();
+            // SAFETY: it is checked that `results` contains at least one element
+            let first_result = unsafe { iter_results.next().unwrap_unchecked() };
+            let sent_message = ctx
+                .reply(format!(
+                    "{}\n> {}",
+                    ctx.author().name,
+                    iter_results.fold(first_result.to_string(), |acc, res| acc + " / " + &res.to_string())
+                ))
+                .await?;
+
+            if rolls.len() == 1 && first_result == &69 {
+                for emoji in NICE {
+                    sent_message.message().await?.react(ctx.http(), emoji).await?;
+                }
+            }
+
+            Ok(())
+        },
+        _ => {
+            ctx.reply(format!("{}\n> {}\nTotal: {}", ctx.author().name, ast, ast.value())).await?;
+            Ok(())
+        },
+    }
 }
 
 /// Crée une nouvelle session de jeu.
