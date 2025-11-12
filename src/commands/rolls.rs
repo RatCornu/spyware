@@ -458,10 +458,55 @@ pub async fn roll_twice(ctx: Context<'_>, nb_jets: Option<u32>, #[rest] expr: St
 
     for i in 1..=nb_jets.unwrap_or(2) {
         let ast = exp.eval(&ctx).await?;
-        acc.push_str(&format!("\nJet {i} :\n > {}\nTotal : {}", ast, ast.value()));
+        acc.push_str(&format!("\n\nJet {i} :\n> {}\nTotal : {}", ast, ast.value()));
     }
 
     ctx.reply(acc).await?;
+
+    Ok(())
+}
+
+/// Jette des dés, et envoie le résultat par messages privés.
+///
+/// Exemples :
+/// * `/pr @someone 1d100`
+/// * `/pr @someone 5d6`
+/// * `/pr @someone 1d3 + (3d4 * 2d20)`
+#[command(prefix_command, aliases("pr"), category = "Dés")]
+pub async fn private_roll(ctx: Context<'_>, dest: String, #[rest] expr: String) -> Result<()> {
+    let id = &dest[2..dest.len() - 1];
+    let other_user = UserId::new(id.parse::<u64>().map_err(|_| anyhow!("<@{dest}> n'est pas un utilisateur."))?);
+
+    let exp = match Calculator::parse(Rule::expr, &expr) {
+        Ok(pair) => parse_expr(pair)?,
+        Err(err) => return Err(anyhow!("Erreur dans le parsing: {err}")),
+    };
+
+    let ast = exp.eval(&ctx).await?;
+
+    let dm = ctx.author().create_dm_channel(&ctx).await?;
+    dm.send_message(
+        ctx,
+        CreateMessage::new().content(format!(
+            "Résultat du lancer `{}` :\n> {}\nTotal : {}",
+            ctx.invocation_string(),
+            ast,
+            ast.value()
+        )),
+    )
+    .await?;
+
+    let dm = other_user.create_dm_channel(&ctx).await?;
+    dm.send_message(
+        ctx,
+        CreateMessage::new().content(format!(
+            "Résultat du lancer `{}` :\n> {}\nTotal : {}",
+            ctx.invocation_string(),
+            ast,
+            ast.value()
+        )),
+    )
+    .await?;
 
     Ok(())
 }
