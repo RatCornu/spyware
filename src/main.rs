@@ -19,7 +19,7 @@ use songbird::Songbird;
 use crate::commands::cards::draw;
 use crate::commands::misc::{STARTING_TIME, ping, uptime};
 use crate::commands::music::{ensure, pause, play, resume, skip, stop};
-use crate::commands::rolls::{init_csv, roll, session, stats};
+use crate::commands::rolls::{init_csv, roll, roll_twice, session, stats};
 
 mod commands;
 mod mangas;
@@ -99,6 +99,7 @@ async fn main() -> Result<()> {
                 uptime(),
                 // download(),
                 roll(),
+                roll_twice(),
                 session(),
                 stats(),
                 draw(),

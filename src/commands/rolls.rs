@@ -77,13 +77,13 @@ impl Eq for Roll {}
 
 impl PartialOrd for Roll {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.result.cmp(&other.result))
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for Roll {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
+        self.result.cmp(&other.result)
     }
 }
 
@@ -141,10 +141,12 @@ impl Rolls {
 #[grammar = "./src/commands/rolls.pest"]
 pub struct Calculator;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOperator {
     Minus,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOperator {
     Add,
     Substract,
@@ -153,12 +155,14 @@ pub enum BinaryOperator {
     Modulo,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Dices {
     nb_dices: u32,
     nb_faces: u32,
 }
 
 /// Expressions available during a roll.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr<T> {
     Dices(T),
     Integer(u32),
@@ -179,7 +183,7 @@ impl Display for Expr<Vec<u32>> {
             Expr::Dices(rolls) => {
                 if let Some(first_roll) = rolls.first() {
                     let mut acc = first_roll.to_string();
-                    for r in rolls {
+                    for r in &rolls[1..] {
                         acc.push_str(&format!(", {r}"));
                     }
                     write!(fmt, "[{}]", acc)
@@ -215,16 +219,16 @@ impl Display for Expr<Vec<u32>> {
 
 impl Expr<Dices> {
     #[async_recursion]
-    pub async fn eval(self, ctx: &Context<'_>) -> Result<Expr<Vec<u32>>> {
+    pub async fn eval(&self, ctx: &Context<'_>) -> Result<Expr<Vec<u32>>> {
         match self {
             Expr::Dices(Dices { nb_dices, nb_faces }) => {
                 let mut rolls = Vec::new();
-                for _ in 0..nb_dices {
-                    rolls.push(roll_dice(ctx, nb_faces).await?);
+                for _ in 0..*nb_dices {
+                    rolls.push(roll_dice(ctx, *nb_faces).await?);
                 }
                 Ok(Expr::Dices(rolls))
             },
-            Expr::Integer(int) => Ok(Expr::Integer(int)),
+            Expr::Integer(int) => Ok(Expr::Integer(*int)),
             Expr::UnOp { op, exp } => match op {
                 UnaryOperator::Minus => Ok(Expr::UnOp {
                     op: UnaryOperator::Minus,
@@ -233,7 +237,7 @@ impl Expr<Dices> {
             },
             Expr::BinOp { lhs, op, rhs } => Ok(Expr::BinOp {
                 lhs: Box::new(lhs.eval(ctx).await?),
-                op,
+                op: *op,
                 rhs: Box::new(rhs.eval(ctx).await?),
             }),
         }
@@ -406,7 +410,7 @@ async fn roll_dice(ctx: &Context<'_>, nb_faces: u32) -> Result<u32> {
     Ok(result)
 }
 
-/// Jette des dés
+/// Jette des dés.
 ///
 /// Exemples :
 /// * `/r 1d100`
@@ -421,32 +425,45 @@ pub async fn roll(ctx: Context<'_>, #[rest] expr: String) -> Result<()> {
 
     let ast = exp.eval(&ctx).await?;
 
-    match ast {
-        Expr::Dices(rolls) => {
-            let mut iter_results = rolls.iter();
-            // SAFETY: it is checked that `results` contains at least one element
-            let first_result = unsafe { iter_results.next().unwrap_unchecked() };
-            let sent_message = ctx
-                .reply(format!(
-                    "{}\n> {}",
-                    ctx.author().name,
-                    iter_results.fold(first_result.to_string(), |acc, res| acc + " / " + &res.to_string())
-                ))
-                .await?;
+    if let Expr::Dices(rolls) = &ast {
+        let sent_message = ctx.reply(format!("{}\n> {}", ctx.author().name, ast)).await?;
 
-            if rolls.len() == 1 && first_result == &69 {
-                for emoji in NICE {
-                    sent_message.message().await?.react(ctx.http(), emoji).await?;
-                }
+        if rolls.len() == 1 && rolls[0] == 69 {
+            for emoji in NICE {
+                sent_message.message().await?.react(ctx.http(), emoji).await?;
             }
-
-            Ok(())
-        },
-        _ => {
-            ctx.reply(format!("{}\n> {}\nTotal: {}", ctx.author().name, ast, ast.value())).await?;
-            Ok(())
-        },
+        }
+    } else {
+        ctx.reply(format!("{}\n> {}\nTotal : {}", ctx.author().name, ast, ast.value())).await?;
     }
+
+    Ok(())
+}
+
+/// Jette deux fois les mêmes dés.
+///
+/// Exemples :
+/// * `/rr 1d100`
+/// * `/rr 5d6`
+/// * `/rr 1d3 + (3d4 * 2d20)`
+#[command(prefix_command, aliases("rr"), category = "Dés")]
+pub async fn roll_twice(ctx: Context<'_>, nb_jets: Option<u32>, #[rest] expr: String) -> Result<()> {
+    let exp = match Calculator::parse(Rule::expr, &expr) {
+        Ok(pair) => parse_expr(pair)?,
+        Err(err) => return Err(anyhow!("Erreur dans le parsing: {err}")),
+    };
+
+    let mut acc = String::new();
+    acc.push_str(&ctx.author().name);
+
+    for i in 1..=nb_jets.unwrap_or(2) {
+        let ast = exp.eval(&ctx).await?;
+        acc.push_str(&format!("\nJet {i} :\n > {}\nTotal : {}", ast, ast.value()));
+    }
+
+    ctx.reply(acc).await?;
+
+    Ok(())
 }
 
 /// Crée une nouvelle session de jeu.
