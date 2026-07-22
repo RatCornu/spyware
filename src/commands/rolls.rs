@@ -426,7 +426,7 @@ pub async fn roll(ctx: Context<'_>, #[rest] expr: String) -> Result<()> {
     let ast = exp.eval(&ctx).await?;
 
     if let Expr::Dices(rolls) = &ast {
-        let sent_message = ctx.reply(format!("{}\n> {}", ctx.author().name, ast)).await?;
+        let sent_message = ctx.reply(format!("{}\n> {}\nTotal: {}", ctx.author().name, ast, ast.value())).await?;
 
         if rolls.len() == 1 && rolls[0] == 69 {
             for emoji in NICE {
